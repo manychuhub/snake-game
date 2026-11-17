@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -9,7 +10,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// 초기 데이터
+// Gemini API 인스턴스 초기화 (환경 변수 GEMINI_API_KEY 사용)
+const apiKey = process.env.GEMINI_API_KEY;
+let aiClient = null;
+
+if (apiKey) {
+    aiClient = new GoogleGenAI({ apiKey });
+    console.log("[*] Google Gemini AI Brain successfully connected!");
+} else {
+    console.log("[!] Warning: GEMINI_API_KEY environment variable is not set. Running in standby mode.");
+}
+
+// 인수인계 데이터 저장소
 let handoverItems = [
     {
         id: 1,
@@ -33,29 +45,72 @@ let handoverItems = [
     }
 ];
 
-// 클라우드 지능형 AI 솔루션 생성 함수
-function generateCloudAiAnalysis(rack, detail) {
-    let lower = detail.toLowerCase();
-    let guide = `데이터센터 ${rack} 현장 조치 가이드입니다.\n\n`;
-
-    if (lower.includes('psu') || lower.includes('파워') || lower.includes('전원')) {
-        guide += "1. [1차 육안 점검]: 장비 후면 UID LED 및 PSU LED 상태(Amber/Dark) 확인 및 C13/C14 전원 코드 체결 상태 점검\n";
-        guide += "2. [전원 라인 배제]: 랙 PDU B-Feed 분기 차단기 트립 여부 확인 및 정상 PDU 소켓으로 전원 케이블 교차 테스트\n";
-        guide += "3. [무중단 핫스왑]: PSU1 정상 급전 확인 후 결함 파트 Hot-swap 탈거, 동일 P/N 예비 모듈 장착 후 Solid Green 점등 및 BMC 로그 복구 확인";
-    } else if (lower.includes('crac') || lower.includes('공조') || lower.includes('온도') || lower.includes('습도')) {
-        guide += "1. [센서 원격 텔레메트리 대조]: 해당 Zone Cold Aisle 온습도 센서와 인접 센서값 교차 검증으로 단일 센서 이상 여부 판별\n";
-        guide += "2. [공조기 실사]: CRAC 송풍 팬 회전 상태, 필터 차압계 및 냉각수 입출구 밸브 압력 게이지 확인\n";
-        guide += "3. [시설팀 핫라인 이관]: 자동 제어 밸브(FCV) 수동 개도율 조절 및 2차 시설 비상 프로토콜 가동";
-    } else if (lower.includes('crc') || lower.includes('스위치') || lower.includes('광') || lower.includes('네트워크')) {
-        guide += "1. [인터페이스 상태 확인]: switch# show interface 카운터 확인 및 DOM(Digital Optical Monitoring) Rx 수신 광레벨 측정\n";
-        guide += "2. [물리 패치 점검]: LC 광패치 코드 클리닝 및 감쇠기 체결 확인 후 인접 스페어 포트로 교차 연결\n";
-        guide += "3. [트랜시버 교체]: 100G/40G QSFP28 모듈 핫스왑 교체 및 LACP 번들 정상 링크업(Up/Up) 확인";
-    } else {
-        guide += "1. [현장 섀시 위치 특정]: 대상 랙 전/후면 UID 램프 점등 후 U-Number(위치) 정확히 식별\n";
-        guide += "2. [OOB/IPMI 로그 추출]: 원격 관리 콘솔(iDRAC/iLO) System Event Log(SEL) 다운로드 및 최근 Critical 이벤트 분석\n";
-        guide += "3. [부품 교체 및 정상화 검증]: 예비 파트 교체 후 벤더사 진단 툴(Diagnostic Tool) 패스 확인";
+// 🧠 실제 Gemini AI 추론 함수 (장애 대응 솔루션)
+async function askGeminiForSolution(rack, detail) {
+    if (!aiClient) {
+        return "⚠️ [알림]: GEMINI_API_KEY가 아직 등록되지 않았습니다. Render 대시보드의 Environment 설정에 API 키를 등록하면 실시간 최신 AI 두뇌가 활성화됩니다!";
     }
-    return guide;
+
+    const prompt = `
+너는 20년 경력의 데이터센터(IDC) 수석 시스템 및 인프라 엔지니어 AI 어시스턴트다.
+현장 엔지니어가 등록한 다음 인수인계/장애 내역을 면밀히 분석하고, 현장에서 즉시 실행해야 할 가장 전문적이고 안전한 1차/2차 점검 및 조치 절차 3가지를 명확히 작성해줘:
+
+- 장애 위치: ${rack}
+- 장애 및 인수인계 내용: ${detail}
+
+작성 가이드:
+1. 전문적이고 구체적인 현장 용어(UID LED, PDU Feed 분기, Reseat, Hot-swap, OOB/iDRAC/iLO 로그 등)를 자연스럽게 포함할 것.
+2. 각 단계는 "1. [1차 점검]: ...", "2. [원인 격리]: ...", "3. [부품 교체 및 정상화 검증]: ..." 형태로 가독성 높게 작성할 것.
+`;
+
+    try {
+        const response = await aiClient.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt
+        });
+        return response.text;
+    } catch (err) {
+        console.error("Gemini API Error:", err);
+        return `[Gemini AI 호출 오류]: ${err.message}`;
+    }
+}
+
+// 🧠 실제 Gemini AI 추론 함수 (교대 브리핑 리포트)
+async function askGeminiForBriefing(pendingItems) {
+    if (!aiClient) {
+        return "⚠️ [AI 두뇌 대기중]: GEMINI_API_KEY를 등록하시면 실시간 AI 요약 브리핑이 자동 활성화됩니다.";
+    }
+
+    if (!pendingItems || pendingItems.length === 0) {
+        return "🎉 [AI 브리핑]: 현재 미조치된 인수인계 및 장애 항목이 없습니다. 모든 인프라가 정상 운용 중입니다.";
+    }
+
+    const listText = pendingItems.map((item, idx) => 
+        `${idx + 1}. [${item.severity}] 위치: ${item.rack} | 카테고리: ${item.category} | 내용: ${item.detail}`
+    ).join("\n");
+
+    const prompt = `
+너는 데이터센터 총괄 책임자(Operations Lead) AI다.
+다음은 교대 근무조로부터 인계받은 미결 장애 및 작업 목록이다:
+
+${listText}
+
+다음 세 가지 항목으로 깔끔하고 명확하게 한국어로 교대 브리핑을 작성해줘:
+1. 🚨 [최우선 주간조 착수 액션]
+2. ⚠️ [관찰 및 집중 모니터링 포인트]
+3. 💡 [수석 엔지니어 현장 조언]
+`;
+
+    try {
+        const response = await aiClient.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt
+        });
+        return response.text;
+    } catch (err) {
+        console.error("Gemini Briefing Error:", err);
+        return `[Gemini 브리핑 생성 오류]: ${err.message}`;
+    }
 }
 
 // API 라우트
@@ -63,10 +118,18 @@ app.get('/api/items', (req, res) => {
     res.json(handoverItems);
 });
 
-app.post('/api/ai_analyze', (req, res) => {
+// AI 개별 솔루션 분석 API
+app.post('/api/ai_analyze', async (req, res) => {
     const { rack, detail } = req.body;
-    const analysis = generateCloudAiAnalysis(rack, detail);
+    const analysis = await askGeminiForSolution(rack, detail);
     res.json({ analysis });
+});
+
+// AI 전체 교대 브리핑 API
+app.post('/api/ai_briefing', async (req, res) => {
+    const pending = handoverItems.filter(i => !i.completed);
+    const briefing = await askGeminiForBriefing(pending);
+    res.json({ briefing });
 });
 
 app.post('/api/add', (req, res) => {
@@ -110,5 +173,5 @@ app.post('/api/trigger_handover', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`DC-OPS Cloud Server running on port ${PORT}`);
+    console.log(`DC-OPS Real LLM Cloud Server running on port ${PORT}`);
 });

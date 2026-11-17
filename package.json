@@ -1,12 +1,13 @@
 {
   "name": "dc-ops-cloud",
   "version": "1.0.0",
-  "description": "DC-OPS AI Cloud Handover System",
+  "description": "DC-OPS AI Real LLM Cloud Handover System",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "cors": "^2.8.5"
+    "@google/genai": "^0.1.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
   }
 }
