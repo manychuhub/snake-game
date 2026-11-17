@@ -532,6 +532,11 @@
                 <p id="tabHeaderDesc">타인과 링크를 공유하여 누구나 실시간으로 인수인계를 남기고 조치 완료를 체크할 수 있습니다.</p>
             </div>
             <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: var(--bg-card-sub); border: 1px solid var(--border); padding: 6px 12px; border-radius: 20px; font-size: 0.82rem; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: var(--text-sub);">현재 작업자:</span>
+                    <strong id="myOperatorName" style="color: var(--primary);">주간조 교대자</strong>
+                    <button onclick="changeMyName()" style="background: none; border: none; color: #94a3b8; cursor: pointer; text-decoration: underline; font-size: 0.75rem;">(변경)</button>
+                </div>
                 <button id="btnAutoHandover" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--success); color: var(--success); padding: 8px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: bold; cursor: pointer;">
                     🔄 교대 인수인계 자동 체결 및 이관
                 </button>
@@ -916,37 +921,60 @@
             } catch (err) {}
         }
 
-        // 현재 사용자 이름 가져오기
-        function getCurrentUser() {
-            const el = document.getElementById('authorInput');
-            return (el && el.value.trim()) ? el.value.trim() : "현장 엔지니어";
+        // 현재 세션의 접속자(본인) 이름 관리
+        function getMyOperatorName() {
+            let saved = localStorage.getItem('dc_current_operator');
+            if (!saved) {
+                saved = "주간조 교대자";
+                localStorage.setItem('dc_current_operator', saved);
+            }
+            return saved;
         }
 
-        window.deleteItem = async function(id) {
-            const user = getCurrentUser();
-            if (confirm(`[${user}] 님, 정말 이 인수인계 항목을 삭제하시겠습니까? (감사 로그에 영구 기록됩니다)`)) {
-                try {
-                    const res = await fetch('/api/delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id, user })
-                    });
-                    if (res.ok) {
-                        handoverItems = await res.json();
-                        renderLogs();
-                        fetchAuditLogs();
-                    }
-                } catch (e) { alert("삭제 실패: " + e.message); }
+        // 로그인 사용자 변경
+        window.changeMyName = function() {
+            const current = getMyOperatorName();
+            const input = prompt("현재 접속자(본인) 이름을 입력해 주세요:\n(이 이름으로 삭제, 체크, 감사 로그가 기록됩니다)", current);
+            if (input && input.trim()) {
+                localStorage.setItem('dc_current_operator', input.trim());
+                updateOperatorBadge();
             }
         };
 
+        function updateOperatorBadge() {
+            const el = document.getElementById('myOperatorName');
+            if (el) el.textContent = getMyOperatorName();
+        }
+
+        window.deleteItem = async function(id) {
+            let operator = getMyOperatorName();
+            const inputName = prompt(`이 인수인계 항목을 삭제하시겠습니까?\n삭제를 진행하는 본인(교대자)의 이름을 확인/입력하세요:`, operator);
+            if (inputName === null) return; // 취소
+            operator = inputName.trim() || operator;
+            localStorage.setItem('dc_current_operator', operator);
+            updateOperatorBadge();
+
+            try {
+                const res = await fetch('/api/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, user: operator })
+                });
+                if (res.ok) {
+                    handoverItems = await res.json();
+                    renderLogs();
+                    fetchAuditLogs();
+                }
+            } catch (e) { alert("삭제 실패: " + e.message); }
+        };
+
         window.toggleComplete = async function(id) {
-            const user = getCurrentUser();
+            const operator = getMyOperatorName();
             try {
                 const res = await fetch('/api/toggle', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, user })
+                    body: JSON.stringify({ id, user: operator })
                 });
                 if (res.ok) {
                     handoverItems = await res.json();
@@ -1140,6 +1168,7 @@
             }
         };
 
+        updateOperatorBadge();
         fetchItems();
         fetchAuditLogs();
         setInterval(fetchItems, 1500);
