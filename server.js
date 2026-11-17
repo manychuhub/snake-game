@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -10,12 +10,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Gemini API 인스턴스 초기화
+// Gemini API 인스턴스 초기화 (안정적인 @google/generative-ai SDK 사용)
 const apiKey = process.env.GEMINI_API_KEY;
-let aiClient = null;
+let genAI = null;
+let model = null;
 
 if (apiKey) {
-    aiClient = new GoogleGenAI({ apiKey });
+    genAI = new GoogleGenerativeAI(apiKey);
+    model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     console.log("[*] Google Gemini AI Brain successfully connected!");
 } else {
     console.log("[!] Warning: GEMINI_API_KEY environment variable is not set. Running in standby mode.");
@@ -47,8 +49,8 @@ let handoverItems = [
 
 // 🧠 1. 실시간 대화형 AI 챗봇 함수
 async function chatWithGemini(userMessage) {
-    if (!aiClient) {
-        return "⚠️ [AI 두뇌 대기 상태]: Render 대시보드의 'Environment' 메뉴에 'GEMINI_API_KEY'가 아직 등록되지 않았습니다. 키를 등록하시면 즉시 최신 Gemini 2.5 Flash가 지능적으로 답변합니다!";
+    if (!model) {
+        return "⚠️ [AI 두뇌 대기 상태]: Render 대시보드의 'Environment' 메뉴에 'GEMINI_API_KEY'가 아직 등록되지 않았습니다. 키를 등록하시면 즉시 최신 Gemini AI가 지능적으로 답변합니다!";
     }
 
     const systemInstruction = `
@@ -59,11 +61,8 @@ async function chatWithGemini(userMessage) {
 `;
 
     try {
-        const response = await aiClient.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `${systemInstruction}\n\n사용자 질문: ${userMessage}`
-        });
-        return response.text;
+        const result = await model.generateContent(`${systemInstruction}\n\n사용자 질문: ${userMessage}`);
+        return result.response.text();
     } catch (err) {
         console.error("Gemini Chat Error:", err);
         return `[Gemini AI 통신 오류]: ${err.message}`;
@@ -72,7 +71,7 @@ async function chatWithGemini(userMessage) {
 
 // 🧠 2. 장애 대응 솔루션 분석
 async function askGeminiForSolution(rack, detail) {
-    if (!aiClient) {
+    if (!model) {
         return "⚠️ [알림]: GEMINI_API_KEY가 아직 등록되지 않았습니다. Render 대시보드의 Environment 설정에 API 키를 등록하면 실시간 최신 AI 두뇌가 활성화됩니다!";
     }
 
@@ -89,11 +88,8 @@ async function askGeminiForSolution(rack, detail) {
 `;
 
     try {
-        const response = await aiClient.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt
-        });
-        return response.text;
+        const result = await model.generateContent(prompt);
+        return result.response.text();
     } catch (err) {
         return `[Gemini AI 호출 오류]: ${err.message}`;
     }
