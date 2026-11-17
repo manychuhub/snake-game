@@ -407,6 +407,23 @@
             color: #ffffff;
         }
 
+        .btn-ai-analyze {
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--primary);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn-ai-analyze:hover {
+            background: var(--primary);
+            color: #040810;
+        }
+
         /* 테이블 공통 디자인 */
         .dc-table {
             width: 100%;
@@ -914,7 +931,10 @@
                             <input type="checkbox" ${item.completed ? 'checked' : ''} onchange="toggleComplete(${item.id})">
                             <span>${item.completed ? '인수인계 확인 및 조치 완료됨' : '확인/조치 완료 체크'}</span>
                         </label>
-                        <button class="btn-delete" onclick="deleteItem(${item.id})">🗑️ 삭제</button>
+                        <div style="display: flex; gap: 6px;">
+                            <button class="btn-ai-analyze" onclick="requestAiAnalysis('${item.rack}', '${encodeURIComponent(item.detail)}')">🧠 AI 대응 솔루션 분석</button>
+                            <button class="btn-delete" onclick="deleteItem(${item.id})">🗑️ 삭제</button>
+                        </div>
                     </div>
                 `;
                 logListEl.appendChild(card);
@@ -999,6 +1019,27 @@
 
         fetchItems();
         setInterval(fetchItems, 1500);
+
+        // AI 개별 인수인계 건 현장 대응 분석 요청
+        window.requestAiAnalysis = async function(rack, encodedDetail) {
+            const detail = decodeURIComponent(encodedDetail);
+            const overlay = document.getElementById('aiBriefingText');
+            overlay.textContent = `🛰️ [WSL Antigravity AI 엔진 추론 중...]\n>> ${rack} 장애 로그 심층 분석 및 엔지니어 1차/2차 대응 가이드라인 생성 중입니다.`;
+
+            try {
+                const res = await fetch('/api/ai_analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rack, detail })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    overlay.textContent = `💡 [WSL AI 수석 엔지니어 현장 가이드 - ${rack}]\n\n` + data.analysis;
+                }
+            } catch (e) {
+                overlay.textContent = "AI 분석 실패: " + e.message;
+            }
+        };
 
         // 원클릭 인수인계 자동 체결 및 다음 조 이관 버튼
         const btnAuto = document.getElementById('btnAutoHandover');
