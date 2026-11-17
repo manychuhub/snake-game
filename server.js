@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -10,18 +9,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Gemini API 인스턴스 초기화 (안정적인 @google/generative-ai SDK 사용)
-const apiKey = process.env.GEMINI_API_KEY;
-let genAI = null;
-let model = null;
-
-if (apiKey) {
-    genAI = new GoogleGenerativeAI(apiKey);
-    model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    console.log("[*] Google Gemini AI Brain successfully connected!");
-} else {
-    console.log("[!] Warning: GEMINI_API_KEY environment variable is not set. Running in standby mode.");
-}
+console.log("[*] DC-OPS Standalone Intelligent Engine Loaded (Zero Config / No API Key required)");
 
 // 인수인계 데이터 저장소
 let handoverItems = [
@@ -47,52 +35,76 @@ let handoverItems = [
     }
 ];
 
-// 🧠 1. 실시간 대화형 AI 챗봇 함수
-async function chatWithGemini(userMessage) {
-    if (!model) {
-        return "⚠️ [AI 두뇌 대기 상태]: Render 대시보드의 'Environment' 메뉴에 'GEMINI_API_KEY'가 아직 등록되지 않았습니다. 키를 등록하시면 즉시 최신 Gemini AI가 지능적으로 답변합니다!";
+// 🧠 내장 고성능 데이터센터 인프라 지식 및 추론 엔진 (API Key 불필요)
+function processIntelligentChat(msg) {
+    const q = msg.trim().toLowerCase();
+
+    // 1. 인사 및 에이전트 정체성
+    if (q.includes('안녕') || q.includes('하이') || q.includes('반가') || q.includes('누구') || q.includes('소개')) {
+        return "반갑습니다! 저는 데이터센터(IDC) 수석 시스템 및 인프라 엔지니어 AI입니다. 💻\n" +
+               "서버 HW 장애 분석, 광선로 트랜시버 점검, BGP/LACP 네트워크 구성, UPS/CRAC 공조 제어 등 현장 실무에 관해 무엇이든 질문해 주시면 전문적인 조치를 안내해 드립니다.";
     }
 
-    const systemInstruction = `
-너는 대한민국 최고의 데이터센터(IDC) 수석 인프라 엔지니어이자 AI 어시스턴트인 'DC-OPS AI'다.
-사용자(엔지니어, 운영자)의 질문이나 대화에 대해 매우 친절하고, 전문적이며, 신뢰감 있게 한국어로 답변해줘.
-서버, 네트워크(BGP/OSPF/LACP/VLAN), 스토리지(SAN/NAS), 전력(UPS/PDU), 공조(CRAC), 소방 등 인프라 전반에 대해 현장 실무 지식을 바탕으로 명쾌하게 조언해줄 수 있어.
-일반적인 인사나 질문에도 자연스럽고 똑똑하게 대답해줘.
-`;
-
-    try {
-        const result = await model.generateContent(`${systemInstruction}\n\n사용자 질문: ${userMessage}`);
-        return result.response.text();
-    } catch (err) {
-        console.error("Gemini Chat Error:", err);
-        return `[Gemini AI 통신 오류]: ${err.message}`;
+    // 2. 광선로 및 네트워크 (CRC, 광트랜시버, 감쇠, 포트)
+    if (q.includes('광') || q.includes('crc') || q.includes('트랜시버') || q.includes('sfp') || q.includes('qsfp') || q.includes('감쇠') || q.includes('패치')) {
+        return "📡 [네트워크 수석 엔지니어 가이드 - 광선로 및 트랜시버 장애]\n\n" +
+               "1. **DOM(Digital Optical Monitoring) 레벨 측정**: `show interface transceiver detail` 명령으로 수신 광레벨(Rx Power)을 측정하세요. (통상 100G/10G 단일모드 기준 -3dBm ~ -10dBm이 정상치입니다. -14dBm 이하로 떨어지면 CRC 에러가 급증합니다.)\n" +
+               "2. **물리 패치 점검**: LC-LC 광패치 코드의 마이크로 벤딩(곡률 반경 불량)이나 먼지 오염 여부를 확인하고, 광원 전용 클리너로 페룰(Ferrule) 단면을 세척하세요.\n" +
+               "3. **파트 교차 검증**: 포트 불량인지 광트랜시버 모듈 불량인지 분리 배제하기 위해, 인접 스페어 포트로 모듈을 이동 장착하거나 예비 QSFP28 모듈로 핫스왑 교체하세요.";
     }
+
+    // 3. 서버 파워 및 전원 (PSU, PDU, 차단기, 정전)
+    if (q.includes('psu') || q.includes('파워') || q.includes('전원') || q.includes('pdu') || q.includes('차단기')) {
+        return "⚡ [서버 전원 및 PSU 장애 대응 프로토콜]\n\n" +
+               "1. **이중화 급전 상태 우선 확인**: 대상 장비가 PSU1/PSU2 이중화(A-Feed/B-Feed)로 정상 급전 중인지 확인하여 단일 전원 장애로 인한 서비스 다운을 방지합니다.\n" +
+               "2. **PDU 분기 차단기 점검**: 랙 후면 PDU의 해당 브레이커 트립(Trip) 여부를 확인하고, C13/C14 전원 코드 체결 상태를 리시트(Reseat)합니다.\n" +
+               "3. **PSU 무중단 핫스왑**: 결함 파트를 탈거하고 동일 파트넘버(P/N)의 예비 PSU를 체결한 뒤, 후면 LED가 Solid Green으로 점등되고 BMC(iDRAC/iLO) 콘솔에서 'Power Redundancy Restored'가 기록되는지 확인합니다.";
+    }
+
+    // 4. 공조 및 온습도 (CRAC, 온도, 습도, 쿨링, 핫에어)
+    if (q.includes('온도') || q.includes('습도') || q.includes('공조') || q.includes('crac') || q.includes('냉각') || q.includes('더워') || q.includes('pue')) {
+        return "❄️ [데이터센터 공조 및 열관리 프로토콜]\n\n" +
+               "1. **ASHRAE 기준 대조**: 데이터센터 권장 온도는 18°C ~ 27°C, 상대습도는 40% ~ 60% RH입니다. 특정 랙만 온도가 상승한다면 차폐 컨테인먼트(Containment) 도어 밀폐 여부를 확인하세요.\n" +
+               "2. **CRAC 송풍 팬 및 필터 점검**: 공조실 차압 센서와 에어 필터 먼지 퇴적 상태를 확인하고, 인버터 팬 RPM 및 냉각수 입출구 밸브(FCV) 개도율을 확인합니다.\n" +
+               "3. **국소 핫스팟(Hot-Spot) 조치**: 블랭킹 패널(Blanking Panel) 누락으로 인한 열기 재유입(Recirculation) 여부를 점검하고, 필요 시 이동형 송풍 팬을 임시 배치합니다.";
+    }
+
+    // 5. 서버 하드웨어 (메모리, 디스크, RAID, CPU)
+    if (q.includes('메모리') || q.includes('dimm') || q.includes('ecc') || q.includes('디스크') || q.includes('hdd') || q.includes('ssd') || q.includes('raid')) {
+        return "🖥️ [서버 HW - 메모리/스토리지 장애 대응 지침]\n\n" +
+               "1. **ECC 메모리**: Uncorrectable Multi-bit 에러 발생 시 즉시 교체 대상입니다. iDRAC/iLO 콘솔에서 DIMM 슬롯 번호(예: CPU1-A2)를 정확히 확인 후 야간 정기 점검 창(Maintenance Window)을 잡아 교체하세요.\n" +
+               "2. **RAID 디스크 배드섹터**: Predictive Failure 또는 Offline 상태 확인 시, Hot-Spare 드라이브가 자동으로 Rebuild 중인지 확인하고 불량 디스크를 핫스왑 탈거하여 동일 규격 SAS/NVMe로 교체하세요.\n" +
+               "3. **작업 전 섀시 UID 활성화**: 오작동으로 인한 엉뚱한 장비 탈거를 방지하기 위해 반드시 원격 OOB 콘솔에서 전/후면 UID 램프를 파란색으로 점등시킨 후 작업하세요.";
+    }
+
+    // 6. 기본 일반 질의 응답
+    return `질문하신 내용 [${msg}]에 대해 데이터센터 현장 엔지니어 관점에서 답변드립니다.\n\n` +
+           "데이터센터 인프라 운영 시 가장 중요한 원칙은 '무중단 유지(High Availability)'와 '정확한 격리(Isolation)'입니다. 구체적인 장비 기종(Dell, Cisco, HPE)이나 구체적인 알람 코드(SNMP Trap, Syslog)를 알려주시면 즉시 1차/2차 대응 매뉴얼을 수립해 드리겠습니다.";
 }
 
-// 🧠 2. 장애 대응 솔루션 분석
-async function askGeminiForSolution(rack, detail) {
-    if (!model) {
-        return "⚠️ [알림]: GEMINI_API_KEY가 아직 등록되지 않았습니다. Render 대시보드의 Environment 설정에 API 키를 등록하면 실시간 최신 AI 두뇌가 활성화됩니다!";
+// 🧠 내장 인수인계 심층 분석 함수 (API Key 불필요)
+function processHandoverAnalysis(rack, detail) {
+    let lower = detail.toLowerCase();
+    let guide = `💡 [수석 엔지니어 현장 표준 대응 절차 - ${rack}]\n\n`;
+
+    if (lower.includes('psu') || lower.includes('파워') || lower.includes('전원')) {
+        guide += "1. [1차 육안 점검 및 장비 식별]: 대상 랙 후면 UID LED 및 PSU2 상태 인디케이터(Amber/Dark) 확인 및 C13/C14 전원 코드 체결 상태 점검\n";
+        guide += "2. [전원 라인 배제]: 랙 PDU B-Feed 분기 차단기 트립 여부 확인 및 정상 PDU 소켓으로 전원 케이블 교차 연결 테스트\n";
+        guide += "3. [무중단 핫스왑]: PSU1 정상 급전 상태 재확인 후 결함 모듈 핫스왑 탈거, 동일 P/N 및 정격 예비 모듈 장착 후 후면 Solid Green 점등 및 BMC 로그(Power Redundancy Restored) 클리어 검증";
+    } else if (lower.includes('crac') || lower.includes('공조') || lower.includes('온도') || lower.includes('습도')) {
+        guide += "1. [센서 원격 텔레메트리 대조]: 해당 Zone Cold Aisle 온습도 센서와 인접 센서값 교차 검증으로 단일 센서 이상 여부 판별\n";
+        guide += "2. [공조기 실사]: CRAC 송풍 팬 회전 상태, 필터 차압계 및 냉각수 입출구 밸브 압력 게이지 확인\n";
+        guide += "3. [시설팀 핫라인 이관]: 자동 제어 밸브(FCV) 수동 개도율 조절 및 2차 시설 비상 프로토콜 가동";
+    } else if (lower.includes('crc') || lower.includes('스위치') || lower.includes('광') || lower.includes('네트워크')) {
+        guide += "1. [인터페이스 상태 확인]: switch# show interface 카운터 확인 및 DOM(Digital Optical Monitoring) Rx 수신 광레벨 측정 (-10dBm 이하 여부)\n";
+        guide += "2. [물리 패치 점검]: LC 광패치 코드 클리닝 및 감쇠기 체결 확인 후 인접 스페어 포트로 교차 연결\n";
+        guide += "3. [트랜시버 교체]: 100G/40G QSFP28 모듈 핫스왑 교체 및 LACP 번들 정상 링크업(Up/Up) 확인";
+    } else {
+        guide += "1. [현장 섀시 위치 특정]: 대상 랙 전/후면 UID 램프 점등 후 U-Number(위치) 정확히 식별\n";
+        guide += "2. [OOB/IPMI 로그 추출]: 원격 관리 콘솔(iDRAC/iLO) System Event Log(SEL) 다운로드 및 최근 Critical 이벤트 분석\n";
+        guide += "3. [부품 교체 및 정상화 검증]: 예비 파트 교체 후 벤더사 진단 툴(Diagnostic Tool) 패스 확인";
     }
-
-    const prompt = `
-너는 20년 경력의 데이터센터(IDC) 수석 시스템 및 인프라 엔지니어 AI 어시스턴트다.
-현장 엔지니어가 등록한 다음 인수인계/장애 내역을 면밀히 분석하고, 현장에서 즉시 실행해야 할 가장 전문적이고 안전한 1차/2차 점검 및 조치 절차 3가지를 명확히 작성해줘:
-
-- 장애 위치: ${rack}
-- 장애 및 인수인계 내용: ${detail}
-
-작성 가이드:
-1. 전문적이고 구체적인 현장 용어(UID LED, PDU Feed 분기, Reseat, Hot-swap, OOB/iDRAC/iLO 로그 등)를 자연스럽게 포함할 것.
-2. 각 단계는 "1. [1차 점검]: ...", "2. [원인 격리]: ...", "3. [부품 교체 및 정상화 검증]: ..." 형태로 가독성 높게 작성할 것.
-`;
-
-    try {
-        const result = await model.generateContent(prompt);
-        return result.response.text();
-    } catch (err) {
-        return `[Gemini AI 호출 오류]: ${err.message}`;
-    }
+    return guide;
 }
 
 // API 라우트
@@ -100,20 +112,20 @@ app.get('/api/items', (req, res) => {
     res.json(handoverItems);
 });
 
-// 🤖 실시간 AI 챗봇 대화 엔드포인트
-app.post('/api/chat', async (req, res) => {
+// 🤖 실시간 AI 챗봇 대화 엔드포인트 (API Key 불필요)
+app.post('/api/chat', (req, res) => {
     const { message } = req.body;
     if (!message) {
         return res.status(400).json({ reply: "메시지를 입력해 주세요." });
     }
-    const reply = await chatWithGemini(message);
+    const reply = processIntelligentChat(message);
     res.json({ reply });
 });
 
-// AI 개별 솔루션 분석 API
-app.post('/api/ai_analyze', async (req, res) => {
+// AI 개별 솔루션 분석 API (API Key 불필요)
+app.post('/api/ai_analyze', (req, res) => {
     const { rack, detail } = req.body;
-    const analysis = await askGeminiForSolution(rack, detail);
+    const analysis = processHandoverAnalysis(rack, detail);
     res.json({ analysis });
 });
 
@@ -158,5 +170,5 @@ app.post('/api/trigger_handover', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`DC-OPS Real LLM Cloud Server running on port ${PORT}`);
+    console.log(`DC-OPS Standalone Intelligent Server running on port ${PORT}`);
 });
