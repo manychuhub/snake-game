@@ -925,7 +925,13 @@
         function getMyOperatorName() {
             let saved = localStorage.getItem('dc_current_operator');
             if (!saved) {
-                saved = "주간조 교대자";
+                // 처음 접속 시 이름 입력 프롬프트
+                let inputName = prompt("👋 데이터센터 통합 관제 시스템에 오신 것을 환영합니다.\n\n본인(작업자/교대자)의 성함 또는 근무조를 입력해 주세요:\n(입력하신 이름으로 인수인계 등록, 삭제, 조치 완료 및 감사 로그가 기록됩니다)");
+                if (inputName && inputName.trim()) {
+                    saved = inputName.trim();
+                } else {
+                    saved = "현장 엔지니어";
+                }
                 localStorage.setItem('dc_current_operator', saved);
             }
             return saved;
@@ -933,17 +939,26 @@
 
         // 로그인 사용자 변경
         window.changeMyName = function() {
-            const current = getMyOperatorName();
-            const input = prompt("현재 접속자(본인) 이름을 입력해 주세요:\n(이 이름으로 삭제, 체크, 감사 로그가 기록됩니다)", current);
+            const current = localStorage.getItem('dc_current_operator') || "현장 엔지니어";
+            const input = prompt("현재 작업자(본인) 이름을 변경합니다:\n새로운 이름을 입력해 주세요.", current);
             if (input && input.trim()) {
                 localStorage.setItem('dc_current_operator', input.trim());
                 updateOperatorBadge();
+                const authorInput = document.getElementById('authorInput');
+                if (authorInput) authorInput.value = input.trim();
             }
         };
 
         function updateOperatorBadge() {
+            const opName = getMyOperatorName();
             const el = document.getElementById('myOperatorName');
-            if (el) el.textContent = getMyOperatorName();
+            if (el) el.textContent = opName;
+
+            // 인수인계 작성 폼의 인계자 이름도 본인 이름으로 자동 동기화
+            const authorInput = document.getElementById('authorInput');
+            if (authorInput && (!authorInput.value || authorInput.value === "이름을 입력하세요" || authorInput.value === "김엔지니어 (야간조)")) {
+                authorInput.value = opName;
+            }
         }
 
         window.deleteItem = async function(id) {
