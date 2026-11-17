@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Gemini API 인스턴스 초기화 (환경 변수 GEMINI_API_KEY 사용)
+// Gemini API 인스턴스 초기화
 const apiKey = process.env.GEMINI_API_KEY;
 let aiClient = null;
 
@@ -45,7 +45,32 @@ let handoverItems = [
     }
 ];
 
-// 🧠 실제 Gemini AI 추론 함수 (장애 대응 솔루션)
+// 🧠 1. 실시간 대화형 AI 챗봇 함수
+async function chatWithGemini(userMessage) {
+    if (!aiClient) {
+        return "⚠️ [AI 두뇌 대기 상태]: Render 대시보드의 'Environment' 메뉴에 'GEMINI_API_KEY'가 아직 등록되지 않았습니다. 키를 등록하시면 즉시 최신 Gemini 2.5 Flash가 지능적으로 답변합니다!";
+    }
+
+    const systemInstruction = `
+너는 대한민국 최고의 데이터센터(IDC) 수석 인프라 엔지니어이자 AI 어시스턴트인 'DC-OPS AI'다.
+사용자(엔지니어, 운영자)의 질문이나 대화에 대해 매우 친절하고, 전문적이며, 신뢰감 있게 한국어로 답변해줘.
+서버, 네트워크(BGP/OSPF/LACP/VLAN), 스토리지(SAN/NAS), 전력(UPS/PDU), 공조(CRAC), 소방 등 인프라 전반에 대해 현장 실무 지식을 바탕으로 명쾌하게 조언해줄 수 있어.
+일반적인 인사나 질문에도 자연스럽고 똑똑하게 대답해줘.
+`;
+
+    try {
+        const response = await aiClient.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `${systemInstruction}\n\n사용자 질문: ${userMessage}`
+        });
+        return response.text;
+    } catch (err) {
+        console.error("Gemini Chat Error:", err);
+        return `[Gemini AI 통신 오류]: ${err.message}`;
+    }
+}
+
+// 🧠 2. 장애 대응 솔루션 분석
 async function askGeminiForSolution(rack, detail) {
     if (!aiClient) {
         return "⚠️ [알림]: GEMINI_API_KEY가 아직 등록되지 않았습니다. Render 대시보드의 Environment 설정에 API 키를 등록하면 실시간 최신 AI 두뇌가 활성화됩니다!";
@@ -70,46 +95,7 @@ async function askGeminiForSolution(rack, detail) {
         });
         return response.text;
     } catch (err) {
-        console.error("Gemini API Error:", err);
         return `[Gemini AI 호출 오류]: ${err.message}`;
-    }
-}
-
-// 🧠 실제 Gemini AI 추론 함수 (교대 브리핑 리포트)
-async function askGeminiForBriefing(pendingItems) {
-    if (!aiClient) {
-        return "⚠️ [AI 두뇌 대기중]: GEMINI_API_KEY를 등록하시면 실시간 AI 요약 브리핑이 자동 활성화됩니다.";
-    }
-
-    if (!pendingItems || pendingItems.length === 0) {
-        return "🎉 [AI 브리핑]: 현재 미조치된 인수인계 및 장애 항목이 없습니다. 모든 인프라가 정상 운용 중입니다.";
-    }
-
-    const listText = pendingItems.map((item, idx) => 
-        `${idx + 1}. [${item.severity}] 위치: ${item.rack} | 카테고리: ${item.category} | 내용: ${item.detail}`
-    ).join("\n");
-
-    const prompt = `
-너는 데이터센터 총괄 책임자(Operations Lead) AI다.
-다음은 교대 근무조로부터 인계받은 미결 장애 및 작업 목록이다:
-
-${listText}
-
-다음 세 가지 항목으로 깔끔하고 명확하게 한국어로 교대 브리핑을 작성해줘:
-1. 🚨 [최우선 주간조 착수 액션]
-2. ⚠️ [관찰 및 집중 모니터링 포인트]
-3. 💡 [수석 엔지니어 현장 조언]
-`;
-
-    try {
-        const response = await aiClient.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt
-        });
-        return response.text;
-    } catch (err) {
-        console.error("Gemini Briefing Error:", err);
-        return `[Gemini 브리핑 생성 오류]: ${err.message}`;
     }
 }
 
@@ -118,18 +104,21 @@ app.get('/api/items', (req, res) => {
     res.json(handoverItems);
 });
 
+// 🤖 실시간 AI 챗봇 대화 엔드포인트
+app.post('/api/chat', async (req, res) => {
+    const { message } = req.body;
+    if (!message) {
+        return res.status(400).json({ reply: "메시지를 입력해 주세요." });
+    }
+    const reply = await chatWithGemini(message);
+    res.json({ reply });
+});
+
 // AI 개별 솔루션 분석 API
 app.post('/api/ai_analyze', async (req, res) => {
     const { rack, detail } = req.body;
     const analysis = await askGeminiForSolution(rack, detail);
     res.json({ analysis });
-});
-
-// AI 전체 교대 브리핑 API
-app.post('/api/ai_briefing', async (req, res) => {
-    const pending = handoverItems.filter(i => !i.completed);
-    const briefing = await askGeminiForBriefing(pending);
-    res.json({ briefing });
 });
 
 app.post('/api/add', (req, res) => {
