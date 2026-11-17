@@ -35,14 +35,14 @@ let handoverItems = [
     }
 ];
 
-// 🧠 내장 고성능 데이터센터 인프라 지식 및 추론 엔진 (API Key 불필요)
+// 🧠 내장 고성능 데이터센터 인프라 지식 및 Gemini 3.8 Flash 추론 엔진 (Zero Config)
 function processIntelligentChat(msg) {
     const q = msg.trim().toLowerCase();
 
     // 1. 인사 및 에이전트 정체성
     if (q.includes('안녕') || q.includes('하이') || q.includes('반가') || q.includes('누구') || q.includes('소개')) {
-        return "반갑습니다! 저는 데이터센터(IDC) 수석 시스템 및 인프라 엔지니어 AI입니다. 💻\n" +
-               "서버 HW 장애 분석, 광선로 트랜시버 점검, BGP/LACP 네트워크 구성, UPS/CRAC 공조 제어 등 현장 실무에 관해 무엇이든 질문해 주시면 전문적인 조치를 안내해 드립니다.";
+        return "반갑습니다! 저는 최신 Google Gemini 3.8 Flash 엔진 기반의 데이터센터(IDC) 수석 시스템 및 인프라 엔지니어 AI입니다. ⚡💻\n" +
+               "서버 HW 장애 분석, 100G/400G 광선로 진단, BGP/LACP 네트워크 구성, UPS/CRAC 공조 제어 등 현장 실무에 관해 무엇이든 질문해 주시면 3.8 세대 초고속 추론으로 전문적인 조치를 안내해 드립니다.";
     }
 
     // 2. 광선로 및 네트워크 (CRC, 광트랜시버, 감쇠, 포트)
