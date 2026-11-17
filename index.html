@@ -3,358 +3,1025 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>지렁이 게임 (Snake Game)</title>
+    <title>DC-OPS AI | 데이터센터 엔지니어 통합 업무 시스템</title>
     <style>
+        :root {
+            --bg-main: #0b0f19;
+            --bg-card: #111827;
+            --bg-card-sub: #1f2937;
+            --primary: #38bdf8;
+            --primary-hover: #0ea5e9;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --text-main: #f3f4f6;
+            --text-sub: #9ca3af;
+            --border: #374151;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            user-select: none;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
         }
+
         body {
-            background-color: #1a1a2e;
-            color: #e94560;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-main);
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-        }
-        h1 {
-            color: #0f3460;
-            color: #4ecca3;
-            margin-bottom: 12px;
-            text-shadow: 0 0 10px rgba(78, 204, 163, 0.5);
-        }
-        .scoreboard {
-            display: flex;
-            gap: 30px;
-            font-size: 1.25rem;
-            font-weight: bold;
-            color: #eeeeee;
-            margin-bottom: 15px;
-            background: #16213e;
-            padding: 8px 24px;
-            border-radius: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-        .scoreboard span {
-            color: #4ecca3;
-        }
-        .game-container {
-            position: relative;
-            background: #0f3460;
-            border: 4px solid #4ecca3;
-            border-radius: 8px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            height: 100vh;
             overflow: hidden;
         }
-        canvas {
-            display: block;
-            background-color: #111a2e;
-        }
-        .overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(16, 26, 46, 0.85);
+
+        /* 사이드바 */
+        .sidebar {
+            width: 280px;
+            background-color: var(--bg-card);
+            border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        .brand {
+            display: flex;
             align-items: center;
-            color: #eeeeee;
-            backdrop-filter: blur(4px);
+            gap: 12px;
         }
-        .overlay h2 {
-            font-size: 2.2rem;
-            margin-bottom: 15px;
-            color: #e94560;
-        }
-        .overlay button {
-            background: #4ecca3;
-            color: #111a2e;
-            border: none;
-            padding: 10px 24px;
-            font-size: 1.1rem;
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #0ea5e9, #6366f1);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-weight: bold;
-            border-radius: 25px;
+            font-size: 1.1rem;
+        }
+
+        .brand-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .brand-sub {
+            font-size: 0.75rem;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .sync-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            padding: 4px 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            width: fit-content;
+        }
+
+        .sync-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        .dc-status-widget {
+            background: var(--bg-card-sub);
+            border-radius: 8px;
+            padding: 14px;
+            border: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 0.85rem;
+        }
+
+        .dc-status-item {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .badge-online {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .nav-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .nav-item {
+            padding: 10px 14px;
+            border-radius: 6px;
             cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 10px rgba(78, 204, 163, 0.4);
+            color: var(--text-sub);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
         }
-        .overlay button:hover {
-            background: #3eb891;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 14px rgba(78, 204, 163, 0.6);
+
+        .nav-item:hover, .nav-item.active {
+            background-color: var(--bg-card-sub);
+            color: var(--primary);
+            font-weight: 600;
         }
-        .guide {
-            margin-top: 15px;
-            color: #9aa0a6;
+
+        /* 메인 컨텐츠 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .top-header {
+            padding: 18px 30px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--bg-card);
+        }
+
+        .header-title h1 {
+            font-size: 1.35rem;
+            font-weight: 700;
+        }
+
+        .header-title p {
+            font-size: 0.85rem;
+            color: var(--text-sub);
+            margin-top: 4px;
+        }
+
+        .shift-badge {
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .content-body {
+            padding: 25px 30px;
+        }
+
+        /* 탭 뷰 제어 */
+        .tab-view {
+            display: none;
+        }
+        .tab-view.active {
+            display: block;
+        }
+
+        /* 패널 공통 */
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+        }
+
+        .panel-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 인수인계 탭 레이아웃 */
+        .handover-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.15fr;
+            gap: 25px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 0.8rem;
+            color: var(--text-sub);
+            font-weight: 600;
+        }
+
+        .form-control {
+            background: var(--bg-card-sub);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 9px 12px;
+            color: var(--text-main);
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary);
+        }
+
+        textarea.form-control {
+            resize: vertical;
+            min-height: 100px;
+            line-height: 1.5;
+        }
+
+        .btn-ai {
+            background: linear-gradient(135deg, #0284c7, #6366f1);
+            color: #ffffff;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
             font-size: 0.95rem;
-            text-align: center;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: opacity 0.2s;
         }
-        .key-badge {
-            display: inline-block;
-            background: #16213e;
-            color: #4ecca3;
+
+        .btn-ai:hover { opacity: 0.9; }
+
+        .briefing-box {
+            background: #080d1a;
+            border: 1px solid #1e3a8a;
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .briefing-tag {
+            align-self: flex-start;
+            background: #1e3a8a;
+            color: #93c5fd;
+            font-size: 0.75rem;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .briefing-content {
+            font-size: 0.9rem;
+            line-height: 1.6;
+            color: #e2e8f0;
+            white-space: pre-wrap;
+        }
+
+        .log-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 480px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .log-card {
+            background: var(--bg-card-sub);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: all 0.2s;
+        }
+
+        .log-card.completed {
+            background: rgba(17, 24, 39, 0.6);
+            border-color: rgba(55, 65, 81, 0.5);
+            opacity: 0.75;
+        }
+
+        .log-card.completed .log-title,
+        .log-card.completed .log-detail {
+            text-decoration: line-through;
+            color: #6b7280;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+        }
+
+        .badge-severity {
             padding: 2px 8px;
             border-radius: 4px;
-            border: 1px solid #4ecca3;
-            font-size: 0.85rem;
-            margin: 0 2px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .sev-crit { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .sev-warn { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .sev-info { background: rgba(56, 189, 248, 0.2); color: var(--primary); }
+
+        .log-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 8px;
+            border-top: 1px dashed rgba(255, 255, 255, 0.08);
+            margin-top: 4px;
+        }
+
+        .check-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.82rem;
+            user-select: none;
+            color: var(--text-sub);
+        }
+
+        .check-container input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--success);
+            cursor: pointer;
+        }
+
+        .btn-delete {
+            background: transparent;
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+
+        .btn-delete:hover {
+            background: var(--danger);
+            color: #ffffff;
+        }
+
+        /* 테이블 공통 디자인 */
+        .dc-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            text-align: left;
+        }
+
+        .dc-table th {
+            background: var(--bg-card-sub);
+            color: var(--text-sub);
+            padding: 12px 14px;
+            border-bottom: 2px solid var(--border);
+            font-weight: 600;
+        }
+
+        .dc-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-main);
+        }
+
+        .dc-table tr:hover {
+            background: rgba(31, 41, 55, 0.5);
+        }
+
+        /* 시설 관제 카드 그리드 */
+        .facility-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+        }
+
+        .facility-card {
+            background: var(--bg-card-sub);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .facility-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .facility-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #ffffff;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: #374151;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 4px;
         }
     </style>
 </head>
 <body>
 
-    <h1>🐍 지렁이 게임</h1>
+    <!-- 사이드바 -->
+    <div class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">DC</div>
+            <div>
+                <div class="brand-title">DC-OPS AI</div>
+                <div class="brand-sub">데이터센터 엔지니어 포털</div>
+            </div>
+        </div>
 
-    <div class="scoreboard">
-        <div>현재 점수: <span id="currentScore">0</span></div>
-        <div>최고 점수: <span id="highScore">0</span></div>
+        <div class="sync-badge">
+            <div class="sync-dot"></div>
+            <span>공유 동기화 활성 (실시간)</span>
+        </div>
+
+        <div class="dc-status-widget">
+            <div style="font-weight: 600; color: #fff; margin-bottom: 2px;">센터 모니터링 요약</div>
+            <div class="dc-status-item">
+                <span>서버실 평균 온도</span>
+                <span style="color: var(--primary);">21.8°C</span>
+            </div>
+            <div class="dc-status-item">
+                <span>항온항습기(CRAC)</span>
+                <span class="badge-online">정상 (10/10)</span>
+            </div>
+            <div class="dc-status-item">
+                <span>UPS 총 부하율</span>
+                <span>46.2%</span>
+            </div>
+            <div class="dc-status-item">
+                <span>미해결 인수인계</span>
+                <span id="pendingCount" style="color: var(--warning); font-weight: bold;">0 건</span>
+            </div>
+        </div>
+
+        <ul class="nav-list">
+            <li class="nav-item active" onclick="switchTab('handover', this)">📋 인수인계 대시보드</li>
+            <li class="nav-item" onclick="switchTab('incident', this)">🖥️ 랙/서버 장애 이력</li>
+            <li class="nav-item" onclick="switchTab('facility', this)">⚡ 전력/공조 시설 현황</li>
+            <li class="nav-item" onclick="switchTab('access', this)">📦 출입 및 장비 반출입</li>
+        </ul>
     </div>
 
-    <div class="game-container">
-        <canvas id="gameCanvas" width="400" height="400"></canvas>
-        <div id="overlay" class="overlay">
-            <h2 id="overlayTitle">지렁이 게임</h2>
-            <button id="startBtn">게임 시작</button>
+    <!-- 메인 컨텐츠 -->
+    <div class="main-content">
+        <!-- 상단 헤더 -->
+        <div class="top-header">
+            <div class="header-title">
+                <h1 id="tabHeaderTitle">데이터센터 교대 인수인계 (Shift Handover)</h1>
+                <p id="tabHeaderDesc">타인과 링크를 공유하여 누구나 실시간으로 인수인계를 남기고 조치 완료를 체크할 수 있습니다.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button id="btnAutoHandover" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--success); color: var(--success); padding: 8px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: bold; cursor: pointer;">
+                    🔄 교대 인수인계 자동 체결 및 이관
+                </button>
+                <div class="shift-badge">
+                    현재 교대: 야간조(Night) ➔ 주간조(Day)
+                </div>
+            </div>
+        </div>
+
+        <div class="content-body">
+            
+            <!-- 탭 1: 인수인계 대시보드 -->
+            <div id="tab-handover" class="tab-view active">
+                <div class="handover-grid">
+                    <!-- 왼쪽 입력 패널 -->
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">✍️ 신규 업무/장애 인수인계 등록</div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>인계자 / 담당자</label>
+                                <input type="text" id="authorInput" class="form-control" placeholder="이름을 입력하세요">
+                            </div>
+                            <div class="form-group">
+                                <label>구역 / 랙(Rack) 번호</label>
+                                <input type="text" id="rackInput" class="form-control" placeholder="예: 2층 Hall-B #R14">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>중요도 등급</label>
+                                <select id="severityInput" class="form-control">
+                                    <option value="CRITICAL">긴급 (CRITICAL) - 후속 조치 즉시 필요</option>
+                                    <option value="WARNING" selected>주의 (WARNING) - 모니터링 관찰</option>
+                                    <option value="INFO">일반 (INFO) - 단순 공유/점검 완료</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>작업/장애 분류</label>
+                                <select id="categoryInput" class="form-control">
+                                    <option value="HW장애">서버/스토리지 HW 고장</option>
+                                    <option value="NW장애">스위치/광케이블 링크 이상</option>
+                                    <option value="시설/환경">공조/온습도/UPS 전원</option>
+                                    <option value="정기작업">정기 점검 및 유지보수</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>업무 인수인계 내용 및 조치 경과</label>
+                            <textarea id="detailInput" class="form-control" placeholder="발생 시각, 증상, 1차 조치 내역, 다음 근무조에서 해야 할 일을 자유롭게 적어주세요."></textarea>
+                        </div>
+
+                        <button id="addLogBtn" class="btn-ai">
+                            ⚡ 인수인계 등록 (모든 사용자에게 실시간 전송)
+                        </button>
+                    </div>
+
+                    <!-- 오른쪽 AI 요약 및 로그 -->
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">🤖 AI 근무 교대 브리핑 리포트</div>
+                        </div>
+
+                        <div class="briefing-box">
+                            <div class="briefing-tag">AI 인수인계 요약 및 행동 가이드</div>
+                            <div id="aiBriefingText" class="briefing-content">
+동기화 중입니다...
+                            </div>
+                        </div>
+
+                        <div class="panel-header" style="margin-top: 5px;">
+                            <div class="panel-title" style="font-size: 0.95rem;">📋 최근 교대 인수인계 항목</div>
+                        </div>
+
+                        <div id="logList" class="log-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 탭 2: 🖥️ 랙/서버 장애 이력 -->
+            <div id="tab-incident" class="tab-view">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">🖥️ 랙 및 베어메탈 서버 장애 트래킹 이력</div>
+                        <div style="font-size: 0.85rem; color: var(--text-sub);">최근 72시간 내 발생 티켓</div>
+                    </div>
+                    <table class="dc-table">
+                        <thead>
+                            <tr>
+                                <th>티켓 ID</th>
+                                <th>장비 식별자 / IP</th>
+                                <th>상면 위치 (랙)</th>
+                                <th>장애 유형</th>
+                                <th>발생 시각</th>
+                                <th>진행 상태</th>
+                                <th>담당 엔지니어</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span style="color: var(--primary); font-weight: bold;">#TK-2409</span></td>
+                                <td>SRV-WEB-04 (10.20.14.88)</td>
+                                <td>2F Hall-A #R07</td>
+                                <td>PSU #2 Power Fault (전원 모듈 불량)</td>
+                                <td>오늘 03:40</td>
+                                <td><span style="color: var(--danger); font-weight: bold;">부품 수급 대기</span></td>
+                                <td>이당직</td>
+                            </tr>
+                            <tr>
+                                <td><span style="color: var(--primary); font-weight: bold;">#TK-2408</span></td>
+                                <td>SW-TOR-B14 (10.20.2.1)</td>
+                                <td>2F Hall-B #R14</td>
+                                <td>100G 광트랜시버 CRC 에러 급증</td>
+                                <td>어제 21:15</td>
+                                <td><span style="color: var(--success); font-weight: bold;">조치 완료 (패치 교체)</span></td>
+                                <td>최네트워크</td>
+                            </tr>
+                            <tr>
+                                <td><span style="color: var(--primary); font-weight: bold;">#TK-2407</span></td>
+                                <td>STOR-SAN-02 (10.30.5.12)</td>
+                                <td>3F Hall-D #R02</td>
+                                <td>SAS HDD 7번 슬롯 Bad Sector</td>
+                                <td>어제 14:00</td>
+                                <td><span style="color: var(--warning); font-weight: bold;">Hot-Spare Rebuild 중</span></td>
+                                <td>정스토리지</td>
+                            </tr>
+                            <tr>
+                                <td><span style="color: var(--primary); font-weight: bold;">#TK-2406</span></td>
+                                <td>DB-MASTER-01 (10.10.8.20)</td>
+                                <td>1F Hall-C #R18</td>
+                                <td>ECC Uncorrectable Memory Error</td>
+                                <td>2일 전 18:30</td>
+                                <td><span style="color: var(--success); font-weight: bold;">DIMM 교체 완료</span></td>
+                                <td>김엔지니어</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 탭 3: ⚡ 전력/공조 시설 현황 -->
+            <div id="tab-facility" class="tab-view">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">⚡ 데이터센터 전력(UPS/PDU) 및 공조(CRAC) 실시간 관제</div>
+                        <div style="font-size: 0.85rem; color: var(--success);">● 센서 원격 텔레메트리 연동 정상</div>
+                    </div>
+
+                    <div class="facility-grid">
+                        <!-- UPS 1 -->
+                        <div class="facility-card">
+                            <div class="facility-header">
+                                <span style="font-weight: 600;">메인 UPS #1 (A계통)</span>
+                                <span style="color: var(--success); font-weight: bold;">정상 급전</span>
+                            </div>
+                            <div class="facility-value">46.2 <span style="font-size: 1rem; color: var(--text-sub);">% 부하율</span></div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" style="width: 46.2%; background: var(--primary);"></div>
+                            </div>
+                            <div style="font-size: 0.8rem; color: var(--text-sub); display: flex; justify-content: space-between;">
+                                <span>배터리 잔여: 100% (25분 보증)</span>
+                                <span>출력: 380V / 60Hz</span>
+                            </div>
+                        </div>
+
+                        <!-- UPS 2 -->
+                        <div class="facility-card">
+                            <div class="facility-header">
+                                <span style="font-weight: 600;">메인 UPS #2 (B계통)</span>
+                                <span style="color: var(--success); font-weight: bold;">정상 급전</span>
+                            </div>
+                            <div class="facility-value">44.8 <span style="font-size: 1rem; color: var(--text-sub);">% 부하율</span></div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" style="width: 44.8%; background: var(--primary);"></div>
+                            </div>
+                            <div style="font-size: 0.8rem; color: var(--text-sub); display: flex; justify-content: space-between;">
+                                <span>배터리 잔여: 100% (25분 보증)</span>
+                                <span>출력: 380V / 60Hz</span>
+                            </div>
+                        </div>
+
+                        <!-- 전산실 온습도 -->
+                        <div class="facility-card">
+                            <div class="facility-header">
+                                <span style="font-weight: 600;">2층 서버실 (Zone-A Cold Aisle)</span>
+                                <span style="color: var(--success); font-weight: bold;">ASHRAE 권장범위</span>
+                            </div>
+                            <div class="facility-value">21.8 <span style="font-size: 1rem; color: var(--text-sub);">°C / 48% RH</span></div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" style="width: 52%; background: var(--success);"></div>
+                            </div>
+                            <div style="font-size: 0.8rem; color: var(--text-sub); display: flex; justify-content: space-between;">
+                                <span>CRAC 가동: 10/10대 운전</span>
+                                <span>풍량: 4,800 CFM</span>
+                            </div>
+                        </div>
+
+                        <!-- 비상발전기 -->
+                        <div class="facility-card">
+                            <div class="facility-header">
+                                <span style="font-weight: 600;">비상 디젤 발전기 (2,000kW)</span>
+                                <span style="color: var(--primary); font-weight: bold;">스탠바이(자동)</span>
+                            </div>
+                            <div class="facility-value">92.4 <span style="font-size: 1rem; color: var(--text-sub);">% 유류 저장량</span></div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" style="width: 92.4%; background: #6366f1;"></div>
+                            </div>
+                            <div style="font-size: 0.8rem; color: var(--text-sub); display: flex; justify-content: space-between;">
+                                <span>연료 연속 가동: 48시간 가능</span>
+                                <span>최근 시운전: 2일 전 정상</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 탭 4: 📦 출입 및 장비 반출입 -->
+            <div id="tab-access" class="tab-view">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">📦 전산실 작업 출입 및 하드웨어 반출입 일지</div>
+                        <div style="font-size: 0.85rem; color: var(--text-sub);">보안 등급 1급 구역 통제</div>
+                    </div>
+                    <table class="dc-table">
+                        <thead>
+                            <tr>
+                                <th>승인 번호</th>
+                                <th>방문객 / 반입자</th>
+                                <th>소속 업체</th>
+                                <th>작업 목적 / 반출입 품목</th>
+                                <th>작업 구역</th>
+                                <th>입실 시각</th>
+                                <th>보안 상태</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span style="color: var(--primary);">#PERM-1102</span></td>
+                                <td>강기술 외 1인</td>
+                                <td>Dell EMC 유지보수팀</td>
+                                <td>PowerEdge R750 메인보드 및 PSU 납품</td>
+                                <td>2F Hall-A</td>
+                                <td>10:20 (현재 재실)</td>
+                                <td><span style="color: var(--warning); font-weight: bold;">엔지니어 동행 감시중</span></td>
+                            </tr>
+                            <tr>
+                                <td><span style="color: var(--primary);">#PERM-1101</span></td>
+                                <td>윤네트</td>
+                                <td>Cisco 기술지원센터</td>
+                                <td>백본 스위치 펌웨어 보안 패치 작업</td>
+                                <td>1F 통신실</td>
+                                <td>09:00 ~ 10:15</td>
+                                <td><span style="color: var(--success); font-weight: bold;">퇴실 및 반출 검사 완료</span></td>
+                            </tr>
+                            <tr>
+                                <td><span style="color: var(--primary);">#PERM-1099</span></td>
+                                <td>송보안</td>
+                                <td>(주)그린소방</td>
+                                <td>가스계 소화설비(FM-200) 압력 실린더 정기점검</td>
+                                <td>전 구역</td>
+                                <td>어제 15:00 ~ 17:30</td>
+                                <td><span style="color: var(--success); font-weight: bold;">점검 완료</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
         </div>
     </div>
 
-    <div class="guide">
-        조작: <span class="key-badge">방향키</span> 또는 <span class="key-badge">W</span> <span class="key-badge">A</span> <span class="key-badge">S</span> <span class="key-badge">D</span> | 일시정지: <span class="key-badge">Space</span>
-    </div>
-
     <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const currentScoreEl = document.getElementById('currentScore');
-        const highScoreEl = document.getElementById('highScore');
-        const overlay = document.getElementById('overlay');
-        const overlayTitle = document.getElementById('overlayTitle');
-        const startBtn = document.getElementById('startBtn');
-
-        const GRID_SIZE = 20; // 20x20 그리드
-        const TILE_COUNT = canvas.width / GRID_SIZE; // 20칸
-
-        let snake = [];
-        let food = { x: 0, y: 0 };
-        let dx = 0;
-        let dy = 0;
-        let nextDx = 0;
-        let nextDy = 0;
-        let score = 0;
-        let highScore = localStorage.getItem('snake_high_score') || 0;
-        let gameInterval = null;
-        let isRunning = false;
-        let isPaused = false;
-        const GAME_SPEED = 110; // ms
-
-        highScoreEl.textContent = highScore;
-
-        function initGame() {
-            snake = [
-                { x: 10, y: 10 },
-                { x: 9, y: 10 },
-                { x: 8, y: 10 }
-            ];
-            dx = 1;
-            dy = 0;
-            nextDx = 1;
-            nextDy = 0;
-            score = 0;
-            currentScoreEl.textContent = score;
-            spawnFood();
-        }
-
-        function spawnFood() {
-            let valid = false;
-            while (!valid) {
-                food.x = Math.floor(Math.random() * TILE_COUNT);
-                food.y = Math.floor(Math.random() * TILE_COUNT);
-                valid = !snake.some(segment => segment.x === food.x && segment.y === food.y);
+        // 탭 전환 로직
+        const tabInfo = {
+            'handover': {
+                title: '데이터센터 교대 인수인계 (Shift Handover)',
+                desc: '타인과 링크를 공유하여 누구나 실시간으로 인수인계를 남기고 조치 완료를 체크할 수 있습니다.'
+            },
+            'incident': {
+                title: '랙 및 베어메탈 서버 장애 트래킹 (Incident Management)',
+                desc: '서버 하드웨어, 스토리지 드라이브, TOR 스위치 등 물리적 장애 발생 및 수리 이력을 통합 관리합니다.'
+            },
+            'facility': {
+                title: '전력 및 공조 인프라 실시간 관제 (Facility Telemetry)',
+                desc: '무정전전원공급장치(UPS), 항온항습기(CRAC), 전산실 PUE 및 비상발전기 상태를 모니터링합니다.'
+            },
+            'access': {
+                title: '전산실 출입 및 하드웨어 반출입 승인 관리 (Access & Asset Log)',
+                desc: '외주 엔지니어 전산실 출입 통제 및 서버/부품 반출입 보안 승인 현황을 실시간 관리합니다.'
             }
+        };
+
+        function switchTab(tabKey, el) {
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            el.classList.add('active');
+
+            document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+            document.getElementById(`tab-${tabKey}`).classList.add('active');
+
+            document.getElementById('tabHeaderTitle').textContent = tabInfo[tabKey].title;
+            document.getElementById('tabHeaderDesc').textContent = tabInfo[tabKey].desc;
         }
 
-        function startGame() {
-            initGame();
-            overlay.style.display = 'none';
-            isRunning = true;
-            isPaused = false;
-            if (gameInterval) clearInterval(gameInterval);
-            gameInterval = setInterval(gameLoop, GAME_SPEED);
+        // 인수인계 실시간 동기화 로직
+        let handoverItems = [];
+
+        const logListEl = document.getElementById('logList');
+        const aiBriefingText = document.getElementById('aiBriefingText');
+        const pendingCountEl = document.getElementById('pendingCount');
+        const addLogBtn = document.getElementById('addLogBtn');
+
+        async function fetchItems() {
+            try {
+                const res = await fetch('/api/items');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (JSON.stringify(data) !== JSON.stringify(handoverItems)) {
+                        handoverItems = data;
+                        renderLogs();
+                    }
+                }
+            } catch (err) {}
         }
 
-        function gameOver() {
-            isRunning = false;
-            clearInterval(gameInterval);
-            if (score > highScore) {
-                highScore = score;
-                localStorage.setItem('snake_high_score', highScore);
-                highScoreEl.textContent = highScore;
+        window.deleteItem = async function(id) {
+            if (confirm("정말 이 인수인계 항목을 삭제하시겠습니까?")) {
+                try {
+                    const res = await fetch('/api/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id })
+                    });
+                    if (res.ok) {
+                        handoverItems = await res.json();
+                        renderLogs();
+                    }
+                } catch (e) { alert("삭제 실패: " + e.message); }
             }
-            overlayTitle.textContent = '게임 오버! (점수: ' + score + ')';
-            startBtn.textContent = '다시 시작';
-            overlay.style.display = 'flex';
+        };
+
+        window.toggleComplete = async function(id) {
+            try {
+                const res = await fetch('/api/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                if (res.ok) {
+                    handoverItems = await res.json();
+                    renderLogs();
+                }
+            } catch (e) {}
+        };
+
+        function renderLogs() {
+            logListEl.innerHTML = '';
+            if (handoverItems.length === 0) {
+                logListEl.innerHTML = `<div style="text-align: center; color: var(--text-sub); padding: 40px 0; font-size: 0.9rem;">등록된 인수인계 항목이 없습니다.</div>`;
+            }
+
+            handoverItems.forEach(item => {
+                const card = document.createElement('div');
+                card.className = `log-card ${item.completed ? 'completed' : ''}`;
+                const sevClass = item.severity === 'CRITICAL' ? 'sev-crit' : (item.severity === 'WARNING' ? 'sev-warn' : 'sev-info');
+                
+                card.innerHTML = `
+                    <div class="log-header">
+                        <div class="header-left">
+                            <span class="badge-severity ${sevClass}">[${item.severity}] ${item.category}</span>
+                            ${item.completed ? '<span style="color: var(--success); font-size: 0.75rem; font-weight: bold;">✔ 조치/확인완료</span>' : ''}
+                        </div>
+                        <span style="color: var(--text-sub); font-size: 0.8rem;">${item.time} · ${item.author}</span>
+                    </div>
+                    <div class="log-title">${item.rack}</div>
+                    <div class="log-detail">${item.detail}</div>
+                    <div class="log-actions">
+                        <label class="check-container ${item.completed ? 'checked-label' : ''}">
+                            <input type="checkbox" ${item.completed ? 'checked' : ''} onchange="toggleComplete(${item.id})">
+                            <span>${item.completed ? '인수인계 확인 및 조치 완료됨' : '확인/조치 완료 체크'}</span>
+                        </label>
+                        <button class="btn-delete" onclick="deleteItem(${item.id})">🗑️ 삭제</button>
+                    </div>
+                `;
+                logListEl.appendChild(card);
+            });
+
+            const pendingItems = handoverItems.filter(i => !i.completed);
+            pendingCountEl.textContent = `${pendingItems.length} 건`;
+            generateAiBriefing(pendingItems);
         }
 
-        function gameLoop() {
-            if (isPaused) return;
+        function generateAiBriefing(pendingItems) {
+            const criticals = pendingItems.filter(i => i.severity === 'CRITICAL');
+            const warnings = pendingItems.filter(i => i.severity === 'WARNING');
 
-            dx = nextDx;
-            dy = nextDy;
+            let briefing = "📢 [AI 교대 브리핑 Summary]\n";
+            briefing += `• 현재 미조치 인계 건수: 총 ${pendingItems.length}건 (긴급: ${criticals.length}건, 주의: ${warnings.length}건)\n\n`;
 
-            const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+            if (criticals.length > 0) {
+                briefing += "🚨 [최우선 후속 액션 (주간조 착수 필수)]\n";
+                criticals.forEach(c => {
+                    briefing += `- [${c.rack}] ${c.detail.split('.')[0]}. (예비 파트 재고 확인 및 교체 작업 승인 필요)\n`;
+                });
+                briefing += "\n";
+            } else {
+                briefing += "✅ 긴급 대응 이슈 없음: 크리티컬 미완료 항목이 없습니다.\n\n";
+            }
 
-            // 벽 충돌 감지
-            if (head.x < 0 || head.x >= TILE_COUNT || head.y < 0 || head.y >= TILE_COUNT) {
-                gameOver();
+            if (warnings.length > 0) {
+                briefing += "⚠️ [관찰 및 모니터링 요망]\n";
+                warnings.forEach(w => {
+                    briefing += `- ${w.rack}: 특이 징후 지속 여부 대시보드 주시.\n`;
+                });
+            } else if (pendingItems.length === 0) {
+                briefing += "🎉 모든 인수인계 항목이 정상적으로 확인 및 조치 완료되었습니다.";
+            }
+
+            aiBriefingText.textContent = briefing;
+        }
+
+        addLogBtn.addEventListener('click', async () => {
+            const author = document.getElementById('authorInput').value.trim() || "익명 엔지니어";
+            const rack = document.getElementById('rackInput').value.trim() || "구역 미지정";
+            const severity = document.getElementById('severityInput').value;
+            const category = document.getElementById('categoryInput').value;
+            const detail = document.getElementById('detailInput').value.trim();
+
+            if (!detail) {
+                alert("인수인계 내용을 입력해 주세요.");
                 return;
             }
 
-            // 자기 자신 충돌 감지
-            for (let i = 0; i < snake.length; i++) {
-                if (head.x === snake[i].x && head.y === snake[i].y) {
-                    gameOver();
-                    return;
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            const newItem = {
+                id: Date.now(),
+                author,
+                rack,
+                severity,
+                category,
+                time: timeStr,
+                detail,
+                completed: false
+            };
+
+            addLogBtn.disabled = true;
+            try {
+                const res = await fetch('/api/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newItem)
+                });
+                if (res.ok) {
+                    handoverItems = await res.json();
+                    renderLogs();
+                    document.getElementById('detailInput').value = '';
+                    document.getElementById('rackInput').value = '';
                 }
-            }
+            } catch (e) { alert("전송 실패: " + e.message); }
+            finally { addLogBtn.disabled = false; }
+        });
 
-            snake.unshift(head);
+        fetchItems();
+        setInterval(fetchItems, 1500);
 
-            // 음식 먹기
-            if (head.x === food.x && head.y === food.y) {
-                score += 10;
-                currentScoreEl.textContent = score;
-                spawnFood();
-            } else {
-                snake.pop();
-            }
-
-            draw();
-        }
-
-        function draw() {
-            // 배경 지우기
-            ctx.fillStyle = '#111a2e';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // 격자선 살짝 표시
-            ctx.strokeStyle = '#16233b';
-            ctx.lineWidth = 1;
-            for (let i = 0; i < canvas.width; i += GRID_SIZE) {
-                ctx.beginPath();
-                ctx.moveTo(i, 0);
-                ctx.lineTo(i, canvas.height);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(0, i);
-                ctx.lineTo(canvas.width, i);
-                ctx.stroke();
-            }
-
-            // 먹이 그리기
-            ctx.fillStyle = '#e94560';
-            ctx.beginPath();
-            const foodRadius = GRID_SIZE / 2 - 2;
-            ctx.arc(
-                food.x * GRID_SIZE + GRID_SIZE / 2,
-                food.y * GRID_SIZE + GRID_SIZE / 2,
-                foodRadius,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
-
-            // 지렁이 그리기
-            snake.forEach((segment, index) => {
-                if (index === 0) {
-                    // 머리
-                    ctx.fillStyle = '#4ecca3';
-                } else {
-                    // 몸통 (그라데이션 느낌의 톤다운)
-                    ctx.fillStyle = '#3ca884';
-                }
-                const padding = 1;
-                ctx.fillRect(
-                    segment.x * GRID_SIZE + padding,
-                    segment.y * GRID_SIZE + padding,
-                    GRID_SIZE - padding * 2,
-                    GRID_SIZE - padding * 2
-                );
-
-                // 머리에 눈 그리기
-                if (index === 0) {
-                    ctx.fillStyle = '#111a2e';
-                    const eyeSize = 3;
-                    let eye1X, eye1Y, eye2X, eye2Y;
-                    const cx = segment.x * GRID_SIZE + GRID_SIZE / 2;
-                    const cy = segment.y * GRID_SIZE + GRID_SIZE / 2;
-
-                    if (dx === 1) { // 오른쪽
-                        eye1X = cx + 3; eye1Y = cy - 4;
-                        eye2X = cx + 3; eye2Y = cy + 4;
-                    } else if (dx === -1) { // 왼쪽
-                        eye1X = cx - 3; eye1Y = cy - 4;
-                        eye2X = cx - 3; eye2Y = cy + 4;
-                    } else if (dy === 1) { // 아래
-                        eye1X = cx - 4; eye1Y = cy + 3;
-                        eye2X = cx + 4; eye2Y = cy + 3;
-                    } else { // 위
-                        eye1X = cx - 4; eye1Y = cy - 3;
-                        eye2X = cx + 4; eye2Y = cy - 3;
+        // 원클릭 인수인계 자동 체결 및 다음 조 이관 버튼
+        const btnAuto = document.getElementById('btnAutoHandover');
+        if (btnAuto) {
+            btnAuto.addEventListener('click', async () => {
+                if (confirm("현재 근무조의 미결 인수인계와 점검 내역을 취합하여 다음 근무조로 자동 이관하시겠습니까?")) {
+                    try {
+                        const res = await fetch('/api/trigger_handover', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ shift: '야간조 ➔ 주간조' })
+                        });
+                        if (res.ok) {
+                            handoverItems = await res.json();
+                            renderLogs();
+                            alert("✅ 교대 인수인계 보고서가 자동 생성되어 다음 조로 이관되었습니다.");
+                        }
+                    } catch (e) {
+                        alert("이관 실패: " + e.message);
                     }
-                    ctx.fillRect(eye1X - eyeSize / 2, eye1Y - eyeSize / 2, eyeSize, eyeSize);
-                    ctx.fillRect(eye2X - eyeSize / 2, eye2Y - eyeSize / 2, eyeSize, eyeSize);
                 }
             });
         }
-
-        window.addEventListener('keydown', (e) => {
-            const key = e.key;
-
-            if (key === ' ' || key === 'Spacebar') {
-                if (isRunning) {
-                    isPaused = !isPaused;
-                    overlayTitle.textContent = isPaused ? '일시 정지' : '';
-                    startBtn.textContent = '계속하기';
-                    overlay.style.display = isPaused ? 'flex' : 'none';
-                }
-                return;
-            }
-
-            // 방향 전환 (반대 방향 즉시 이동 방지)
-            if ((key === 'ArrowUp' || key === 'w' || key === 'W') && dy === 0) {
-                nextDx = 0;
-                nextDy = -1;
-            } else if ((key === 'ArrowDown' || key === 's' || key === 'S') && dy === 0) {
-                nextDx = 0;
-                nextDy = 1;
-            } else if ((key === 'ArrowLeft' || key === 'a' || key === 'A') && dx === 0) {
-                nextDx = -1;
-                nextDy = 0;
-            } else if ((key === 'ArrowRight' || key === 'd' || key === 'D') && dx === 0) {
-                nextDx = 1;
-                nextDy = 0;
-            }
-        });
-
-        startBtn.addEventListener('click', () => {
-            if (isPaused) {
-                isPaused = false;
-                overlay.style.display = 'none';
-            } else {
-                startGame();
-            }
-        });
-
-        // 초기 화면 그리기
-        initGame();
-        draw();
     </script>
 </body>
 </html>

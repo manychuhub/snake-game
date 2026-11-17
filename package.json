@@ -1,0 +1,12 @@
+{
+  "name": "dc-ops-cloud",
+  "version": "1.0.0",
+  "description": "DC-OPS AI Cloud Handover System",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
+  }
+}
