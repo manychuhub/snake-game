@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!Agent/
+!Agent/*.py
+!Agent/static/
+!Agent/static/*.css
+!Agent/static/*.html
+!Agent/static/*.js
+!BridgeCLI/
+!BridgeCLI/*.py
+!BridgeCLI/requirements.txt
+!deploy/
+!deploy/run.py
