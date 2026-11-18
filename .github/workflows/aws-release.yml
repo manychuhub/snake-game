@@ -33,7 +33,7 @@ jobs:
             -e SHIFT_BRIDGE_WEB_PASSWORD="$password" shift-bridge-test
           trap 'docker logs shift-bridge-render-test; docker rm -f shift-bridge-render-test >/dev/null' EXIT
           url=http://127.0.0.1:18000
-          curl -fsS --retry 20 --retry-delay 1 --retry-connrefused "$url/healthz"
+          curl -fsS --max-time 2 --retry 25 --retry-delay 1 --retry-all-errors "$url/healthz"
           test "$(curl -sS -o /dev/null -w '%{http_code}' "$url/api/logs")" = 401
           curl -fsS -u "operator:$password" "$url/api/settings/status" \
             | jq -e '.engine_ready and (.api_key_configured | not) and .signed_in_as == "operator"'
