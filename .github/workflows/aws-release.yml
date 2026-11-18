@@ -24,6 +24,19 @@ jobs:
           BRIDGE_DATA_DIR=$(mktemp -d) PYTHONPATH=BridgeCLI python -m unittest discover -s BridgeCLI/tests -v
           node --check Agent/static/app.js
           docker build -t shift-bridge-test .
+      - name: Verify Render container startup and login
+        run: |
+          set -euo pipefail
+          password=synthetic-smoke-test-password
+          docker run -d --name shift-bridge-render-test -p 127.0.0.1:18000:10000 \
+            -e RENDER=true -e RENDER_EXTERNAL_URL=https://shift-bridge-example.onrender.com \
+            -e SHIFT_BRIDGE_WEB_PASSWORD="$password" shift-bridge-test
+          trap 'docker logs shift-bridge-render-test; docker rm -f shift-bridge-render-test >/dev/null' EXIT
+          url=http://127.0.0.1:18000
+          curl -fsS --retry 20 --retry-delay 1 --retry-connrefused "$url/healthz"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "$url/api/logs")" = 401
+          curl -fsS -u "operator:$password" "$url/api/settings/status" \
+            | jq -e '.engine_ready and (.api_key_configured | not) and .signed_in_as == "operator"'
 
   release:
     if: github.ref == format('refs/heads/{0}', vars.AWS_RELEASE_BRANCH || 'shift-bridge') && github.event_name != 'pull_request' && vars.AWS_RELEASE_ROLE_ARN != ''
