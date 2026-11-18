@@ -20,11 +20,15 @@ from http.server import SimpleHTTPRequestHandler
 from socketserver import ThreadingTCPServer
 
 import database as db
+import demo
 import gemini_client as gemini
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-STATIC_ALIASES = {'/': '/index.html', '/about': '/about.html', '/about/': '/about.html'}
-STATIC_PATHS = {'/index.html', '/style.css', '/app.js', '/about.html', '/about.css', '/about.js'}
+STATIC_ALIASES = {'/': '/index.html', '/workspace': '/index.html', '/workspace/': '/index.html',
+                  '/demo': '/index.html', '/demo/': '/index.html', '/about': '/about.html', '/about/': '/about.html'}
+INTRO_FILES = {'/about.html', '/about.css', '/about.js'}
+STATIC_PATHS = {'/index.html', '/style.css', '/app.js'} | INTRO_FILES
+RENDER_PUBLIC_PATHS = {'/demo', '/demo/', '/style.css', '/app.js'} | INTRO_FILES
 
 PORT = int(os.environ.get("PORT", 8000))
 HOST = os.getenv('SHIFT_BRIDGE_WEB_HOST', '127.0.0.1')
@@ -32,6 +36,7 @@ EXPECTED_SIGNER = os.getenv('SHIFT_BRIDGE_ALB_ARN')
 PUBLIC_ORIGIN = os.getenv('SHIFT_BRIDGE_PUBLIC_ORIGIN')
 WEB_USER = os.getenv('SHIFT_BRIDGE_WEB_USER')
 WEB_CREDENTIAL = os.getenv('SHIFT_BRIDGE_WEB_CREDENTIAL')
+ON_RENDER = os.getenv('RENDER') == 'true'
 MAX_REQUEST_BYTES = 14_000_000
 
 if EXPECTED_SIGNER:
@@ -125,20 +130,37 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
     # GET 요청 라우팅
     # ==========================================================================
     def do_GET(self):
+        self.read_request()
+
+    def do_HEAD(self):
+        self.read_request(head=True)
+
+    def read_request(self, *, head=False):
         if self.path == '/healthz':
             return self.send_json({'status': 'ok'})
-        if not self.authorize():
+        url = urllib.parse.urlsplit(self.path)
+        path = url.path
+        public_render = ON_RENDER and WEB_USER and WEB_CREDENTIAL and not EXPECTED_SIGNER
+        if public_render:
+            if path == '/':
+                return self.serve_static('/about.html', head=head)
+            if path in RENDER_PUBLIC_PATHS or STATIC_ALIASES.get(path, path) in INTRO_FILES:
+                return self.serve_static(path, head=head)
+        demo_api = path.startswith('/demo/api/')
+        if not (public_render and demo_api) and not self.authorize():
             return
+        if demo_api:
+            status = urllib.parse.parse_qs(url.query).get('status', [None])[0]
+            payload = demo.read(path, status)
+            if payload is None:
+                return self.send_json({'error': '공개 체험 경로를 찾을 수 없습니다.'}, 404)
+            return self.send_json(payload)
+        if head:
+            return self.serve_static(path, head=True)
         try:
             self.route_get()
         except gemini.BridgeError as error:
             self.send_json({'error': str(error)}, 502)
-
-    def do_HEAD(self):
-        if self.path == '/healthz':
-            return self.send_json({'status': 'ok'})
-        if self.authorize():
-            self.serve_static(urllib.parse.urlsplit(self.path).path, head=True)
 
     def route_get(self):
         parsed_url = urllib.parse.urlparse(self.path)

@@ -26,7 +26,7 @@
 
 비밀번호는 Windows PowerShell에서 `python -c "import secrets; print(secrets.token_urlsafe(32))"`로 생성해 비밀번호 관리자에 보관할 수 있습니다. `PORT`와 `RENDER_EXTERNAL_URL`은 Render 값을 사용합니다. BridgeCLI 인증 토큰은 서버 시작 시 생성됩니다. Gemini 키와 웹 비밀번호는 Render의 Environment에 입력합니다. [Render 환경변수 안내](https://render.com/docs/configure-environment-variables)
 
-**Deploy**를 누른 뒤 Deploys 화면에서 **Live**를 확인합니다. `onrender.com` 주소를 열면 브라우저 로그인 창이 표시됩니다. 로그인 후 웹 상단의 **BridgeCLI → 연결 테스트**로 Gemini 응답을 확인하세요. 키 설정 전에는 로그인과 웹 화면을 확인할 수 있습니다.
+**Deploy**를 누른 뒤 Deploys 화면에서 **Live**를 확인합니다. `onrender.com`의 첫 화면과 `/about`은 공개 소개 페이지입니다. **업무 화면 둘러보기**를 누르면 `/demo`에서 가상 기록과 보고서로 대시보드를 볼 수 있습니다. **운영자 로그인**은 `/workspace`를 열며, 실제 기록과 Gemini 기능은 이 화면에서 사용합니다. 로그인 후 웹 상단의 **BridgeCLI → 연결 테스트**로 Gemini 응답을 확인하세요.
 
 ## 기록 저장
 

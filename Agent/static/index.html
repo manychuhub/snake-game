@@ -20,8 +20,8 @@
             <h2 id="shiftSummaryHeading">교대 현황</h2>
             <dl>
                 <div><dt>현재 교대</dt><dd id="currentShiftText">야간조 → 주간조</dd></div>
-                <div><dt>리전</dt><dd>ap-northeast-2</dd></div>
-                <div><dt>데이터센터</dt><dd>ICN-50 Pod-B</dd></div>
+                <div><dt>리전</dt><dd id="site-region">ap-northeast-2</dd></div>
+                <div><dt>데이터센터</dt><dd id="site-datacenter">ICN-50 Pod-B</dd></div>
             </dl>
         </section>
         <nav class="nav-tabs" aria-label="업무 메뉴">
@@ -70,9 +70,11 @@
                 <button class="btn-api-key" onclick="openApiKeyModal()">
                     <i class="fa-solid fa-key" aria-hidden="true"></i> <span id="apiKeyStatusText">BridgeCLI 연결</span>
                 </button>
+                <a id="demo-login" class="demo-login" href="/workspace" hidden>운영자 로그인</a>
             </div>
         </header>
         <main class="main-container">
+            <p id="demo-notice" class="demo-notice" hidden><strong>공개 체험</strong> 가상 업무 기록, 분류 결과와 교대 보고서를 둘러볼 수 있습니다.</p>
 
         <!-- ============================================================== -->
         <!-- 탭 1: 자유 형식 업무 기록 & 11개 필드 자동 분류 -->

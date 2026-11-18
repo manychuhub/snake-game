@@ -161,6 +161,35 @@ body {
 }
 .btn-api-key:hover { border-color: var(--accent); }
 
+.demo-mode .btn-api-key,
+.demo-mode #workLogsTbody button,
+.demo-mode #priorityTasksTbody button { display: none; }
+
+.demo-login {
+    padding: 7px 12px;
+    border: 1px solid #275675;
+    border-radius: 999px;
+    background: #132638;
+    color: var(--accent);
+    font-size: .8rem;
+    text-decoration: none;
+}
+
+.demo-login:hover { border-color: var(--accent); }
+
+.demo-notice {
+    margin-bottom: 16px;
+    padding: 9px 13px;
+    border: 1px solid #2b416c;
+    border-radius: var(--radius-sm);
+    background: #132033;
+    color: var(--text-muted);
+    font-size: .85rem;
+}
+
+.demo-notice strong { color: var(--accent); margin-right: 6px; }
+.demo-mode .upload-zone, .demo-mode #micBtn { opacity: .55; }
+
 .nav-tabs {
     display: grid;
     gap: 4px;

@@ -17,7 +17,7 @@ PATHS = (
     '.dockerignore', '.gitignore', '.github/workflows/aws-release.yml', 'Dockerfile',
     'README.md', 'Start.bat', 'Publish.bat', 'launch.py', 'publish.py',
     'Agent/README.md', 'Agent/app.py', 'Agent/alb_identity.py', 'Agent/database.py',
-    'Agent/gemini_client.py', 'Agent/static/index.html', 'Agent/static/style.css',
+    'Agent/gemini_client.py', 'Agent/demo.py', 'Agent/static/index.html', 'Agent/static/style.css',
     'Agent/static/app.js', 'Agent/static/about.html', 'Agent/static/about.css', 'Agent/static/about.js',
     'Agent/tests/test_web.py',
     'BridgeCLI/.env.example', 'BridgeCLI/README.md', 'BridgeCLI/api_server.py',

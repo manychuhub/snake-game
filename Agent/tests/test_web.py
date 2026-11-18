@@ -35,7 +35,10 @@ class WebTests(unittest.TestCase):
         connection.request(method, path, body=json.dumps(body) if body is not None else None,
                            headers={'Content-Type': 'application/json', **(headers or {})})
         response = connection.getresponse()
-        return response.status, json.loads(response.read())
+        body = response.read()
+        if body and response.headers.get_content_type() == 'application/json':
+            return response.status, json.loads(body)
+        return response.status, body.decode('utf-8')
 
     def test_cloud_requires_identity_and_same_origin(self):
         origin = 'https://shift.example.com'
@@ -73,19 +76,39 @@ class WebTests(unittest.TestCase):
     def test_local_web_rejects_untrusted_host(self):
         self.assertEqual(self.request('GET', '/api/logs', headers={'Host': 'other.example'})[0], 403)
 
-    def test_render_web_authenticates_api_and_keeps_health_public(self):
+    def test_render_publishes_intro_and_authenticates_workspace_and_api(self):
         credential = b'operator:test-password-for-render'
         digest = hashlib.sha256(credential).hexdigest()
         basic = 'Basic ' + base64.b64encode(credential).decode('ascii')
         origin = 'https://shift-example.onrender.com'
         with (patch.object(app, 'EXPECTED_SIGNER', None),
+              patch.object(app, 'ON_RENDER', True),
               patch.object(app, 'WEB_USER', 'operator'),
               patch.object(app, 'WEB_CREDENTIAL', digest),
               patch.object(app, 'PUBLIC_ORIGIN', origin)):
             self.assertEqual(self.request('GET', '/healthz')[0], 200)
-            self.assertEqual(self.request('GET', '/api/logs')[0], 401)
+            status, page = self.request('GET', '/')
+            self.assertEqual(status, 200)
+            self.assertIn('에이전트 소개 · SHIFT BRIDGE', page)
+            for public_path in ('/about', '/about/', '/about.html', '/about.css', '/about.js',
+                                '/demo', '/demo/', '/app.js', '/style.css'):
+                self.assertEqual(self.request('GET', public_path)[0], 200, public_path)
+                self.assertEqual(self.request('HEAD', public_path)[0], 200, public_path)
+            for protected_path in ('/workspace', '/workspace/', '/index.html', '/api/logs'):
+                self.assertEqual(self.request('GET', protected_path)[0], 401, protected_path)
+                self.assertEqual(self.request('HEAD', protected_path)[0], 401, protected_path)
+            self.assertEqual(self.request('POST', '/api/logs/create', {'raw_text': 'demo'})[0], 401)
+            database.add_work_log({'raw_text': 'private workspace fixture', 'ticket_no': 'PRIVATE-123'})
+            status, demo = self.request('GET', '/demo/api/logs?status=%EB%AF%B8%EC%99%84%EB%A3%8C')
+            self.assertEqual((status, [log['ticket_no'] for log in demo['logs']]), (200, ['DEMO-002']))
+            self.assertEqual(self.request('GET', '/demo/api/reports')[0], 200)
+            self.assertEqual(self.request('GET', '/demo/api/settings/status')[0], 404)
+            self.assertEqual(self.request('POST', '/demo/api/logs', {'raw_text': 'demo'})[0], 401)
             self.assertEqual(self.request('GET', '/api/logs', headers={'Authorization': 'Basic ==bad'})[0], 401)
             auth = {'Authorization': basic}
+            workspace_status, workspace = self.request('GET', '/workspace', headers=auth)
+            self.assertEqual(workspace_status, 200)
+            self.assertIn('id="rawLogInput"', workspace)
             status, data = self.request('GET', '/api/settings/status', headers=auth)
             self.assertEqual((status, data['signed_in_as']), (200, 'operator'))
             self.assertEqual(self.request('POST', '/api/logs/delete', {'id': 1}, auth)[0], 403)

@@ -24,7 +24,7 @@ jobs:
           BRIDGE_DATA_DIR=$(mktemp -d) PYTHONPATH=BridgeCLI python -m unittest discover -s BridgeCLI/tests -v
           node --check Agent/static/app.js
           docker build -t shift-bridge-test .
-      - name: Verify Render container startup and login
+      - name: Verify Render public intro, demo, and workspace login
         run: |
           set -euo pipefail
           password=synthetic-smoke-test-password
@@ -34,6 +34,11 @@ jobs:
           trap 'docker logs shift-bridge-render-test; docker rm -f shift-bridge-render-test >/dev/null' EXIT
           url=http://127.0.0.1:18000
           curl -fsS --max-time 2 --retry 25 --retry-delay 1 --retry-all-errors "$url/healthz"
+          curl -fsS "$url/" | grep -F '에이전트 소개 · SHIFT BRIDGE'
+          curl -fsS -I "$url/about.js"
+          curl -fsS "$url/demo" | grep -F 'id="demo-notice"'
+          curl -fsS "$url/demo/api/logs" | jq -e '.logs | map(.ticket_no) == ["DEMO-001", "DEMO-002"]'
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "$url/workspace")" = 401
           test "$(curl -sS -o /dev/null -w '%{http_code}' "$url/api/logs")" = 401
           curl -fsS -u "operator:$password" "$url/api/settings/status" \
             | jq -e '.engine_ready and (.api_key_configured | not) and .signed_in_as == "operator"'
