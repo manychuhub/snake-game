@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import http.client
 import json
 from pathlib import Path
@@ -70,6 +71,24 @@ class WebTests(unittest.TestCase):
 
     def test_local_web_rejects_untrusted_host(self):
         self.assertEqual(self.request('GET', '/api/logs', headers={'Host': 'other.example'})[0], 403)
+
+    def test_render_web_authenticates_api_and_keeps_health_public(self):
+        credential = b'operator:test-password-for-render'
+        digest = hashlib.sha256(credential).hexdigest()
+        basic = 'Basic ' + base64.b64encode(credential).decode('ascii')
+        origin = 'https://shift-example.onrender.com'
+        with (patch.object(app, 'EXPECTED_SIGNER', None),
+              patch.object(app, 'WEB_USER', 'operator'),
+              patch.object(app, 'WEB_CREDENTIAL', digest),
+              patch.object(app, 'PUBLIC_ORIGIN', origin)):
+            self.assertEqual(self.request('GET', '/healthz')[0], 200)
+            self.assertEqual(self.request('GET', '/api/logs')[0], 401)
+            self.assertEqual(self.request('GET', '/api/logs', headers={'Authorization': 'Basic ==bad'})[0], 401)
+            auth = {'Authorization': basic}
+            status, data = self.request('GET', '/api/settings/status', headers=auth)
+            self.assertEqual((status, data['signed_in_as']), (200, 'operator'))
+            self.assertEqual(self.request('POST', '/api/logs/delete', {'id': 1}, auth)[0], 403)
+            self.assertEqual(self.request('POST', '/api/not-found', {}, {**auth, 'Origin': origin})[0], 404)
 
     def test_shift_report_excludes_resolved_prior_work_and_future_records(self):
         records = [('prior-done', '완료', '2026-01-01 00:00:00'),

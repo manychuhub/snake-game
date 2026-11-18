@@ -4,9 +4,12 @@
 SHIFT BRIDGE - AWS DCO AI 업무 인수인계 시스템
 [Main Web Application Server]
 - 정적 웹 UI와 JSON API를 제공하는 서버
-- 로컬 루프백 또는 인증된 AWS ALB 뒤에서 실행
+- 로컬 루프백 또는 인증된 HTTPS 프록시 뒤에서 실행
 """
 import os
+import base64
+import hashlib
+import hmac
 import sys
 import json
 import time
@@ -26,6 +29,8 @@ PORT = int(os.environ.get("PORT", 8000))
 HOST = os.getenv('SHIFT_BRIDGE_WEB_HOST', '127.0.0.1')
 EXPECTED_SIGNER = os.getenv('SHIFT_BRIDGE_ALB_ARN')
 PUBLIC_ORIGIN = os.getenv('SHIFT_BRIDGE_PUBLIC_ORIGIN')
+WEB_USER = os.getenv('SHIFT_BRIDGE_WEB_USER')
+WEB_CREDENTIAL = os.getenv('SHIFT_BRIDGE_WEB_CREDENTIAL')
 MAX_REQUEST_BYTES = 14_000_000
 
 if EXPECTED_SIGNER:
@@ -66,6 +71,22 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             if not self.subject:
                 self.send_json({'error': '인증된 세션이 필요합니다.'}, 401)
                 return False
+        elif WEB_USER and WEB_CREDENTIAL:
+            values = self.headers.get_all('Authorization', [])
+            if len(values) == 1:
+                scheme, _, payload = values[0].partition(' ')
+                if scheme.lower() == 'basic' and len(payload) <= 4096:
+                    try:
+                        credential = base64.b64decode(payload, validate=True)
+                    except ValueError:
+                        credential = b''
+                    digest = hashlib.sha256(credential).hexdigest()
+                    if hmac.compare_digest(digest, WEB_CREDENTIAL):
+                        self.subject = WEB_USER
+                        return True
+            self.send_json({'error': '로그인이 필요합니다.'}, 401,
+                           headers=(('WWW-Authenticate', 'Basic realm="SHIFT BRIDGE", charset="UTF-8"'),))
+            return False
         else:
             port = self.server.server_address[1]
             if self.headers.get('Host') not in {f'127.0.0.1:{port}', f'localhost:{port}'}:
@@ -73,11 +94,13 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
                 return False
         return True
 
-    def send_json(self, data, status_code=200):
+    def send_json(self, data, status_code=200, *, headers=()):
         body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         if self.command != 'HEAD':
             self.wfile.write(body)
@@ -111,6 +134,8 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             self.send_json({'error': str(error)}, 502)
 
     def do_HEAD(self):
+        if self.path == '/healthz':
+            return self.send_json({'status': 'ok'})
         if self.authorize():
             if urllib.parse.urlsplit(self.path).path in STATIC_PATHS:
                 return super().do_HEAD()
@@ -395,8 +420,10 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "알 수 없는 API 경로입니다."}, 404)
 
 def run():
-    if HOST != '127.0.0.1' and (not EXPECTED_SIGNER or not PUBLIC_ORIGIN or not PUBLIC_ORIGIN.startswith('https://')):
-        sys.exit('External binding requires ALB authentication and a configured HTTPS origin.')
+    if HOST != '127.0.0.1':
+        basic_auth = bool(WEB_USER and WEB_CREDENTIAL)
+        if bool(EXPECTED_SIGNER) == basic_auth or not PUBLIC_ORIGIN or not PUBLIC_ORIGIN.startswith('https://'):
+            sys.exit('External binding requires one authentication method and a configured HTTPS origin.')
     db.init_db()
     ThreadingTCPServer.allow_reuse_address = True
     server_address = (HOST, PORT)

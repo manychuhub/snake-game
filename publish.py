@@ -24,7 +24,7 @@ PATHS = (
     'BridgeCLI/memory.py', 'BridgeCLI/shift_bridge_client.py', 'BridgeCLI/requirements.txt',
     'BridgeCLI/bridge.bat', 'BridgeCLI/start.bat', 'BridgeCLI/stop.bat',
     'BridgeCLI/test.bat', 'BridgeCLI/tests/test_bridge.py',
-    'deploy/README.md', 'deploy/aws.yml', 'deploy/run.py',
+    'deploy/README.md', 'deploy/RENDER.md', 'deploy/aws.yml', 'deploy/run.py',
     'test/README.md', 'test/app.py', 'test/alb_identity.py', 'test/database.py',
     'test/gemini_client.py', 'test/static/index.html', 'test/static/style.css', 'test/static/app.js',
 )

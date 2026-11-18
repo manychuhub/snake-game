@@ -2,7 +2,7 @@
 
 Windows에서 SHIFT BRIDGE와 자체 AI 엔진을 한 폴더로 옮겨 실행하는 패키지입니다.
 
-웹앱과 터미널은 BridgeCLI를 통해 Gemini를 사용합니다. CLI는 인수인계, 문서 검색, 초안 승인처럼 DCO 업무에 맞춘 명령을 제공합니다. Windows에서 사용하거나 [AWS 사설 웹 파일럿](deploy/README.md)을 배포할 수 있습니다.
+웹앱과 터미널은 BridgeCLI를 통해 Gemini를 사용합니다. CLI는 인수인계, 문서 검색, 초안 승인처럼 DCO 업무에 맞춘 명령을 제공합니다. Windows에서 사용하거나 [Render 웹 파일럿](deploy/RENDER.md) 또는 [AWS 사설 웹 파일럿](deploy/README.md)을 배포할 수 있습니다.
 
 ## GitHub 자동 업로드
 

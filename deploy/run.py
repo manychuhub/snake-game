@@ -1,14 +1,42 @@
 """Run a single web process and its loopback-only BridgeCLI engine."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
 import secrets
+import re
 import signal
 import subprocess
 import sys
 import time
 import urllib.request
+
+
+def render_settings(environment):
+    username = environment.pop('SHIFT_BRIDGE_WEB_USER', 'operator')
+    password = environment.pop('SHIFT_BRIDGE_WEB_PASSWORD', '')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', username):
+        raise RuntimeError('SHIFT_BRIDGE_WEB_USER must use letters, numbers, dots, underscores or dashes.')
+    if not 24 <= len(password) <= 256:
+        raise RuntimeError('Set SHIFT_BRIDGE_WEB_PASSWORD to a long random password (24–256 characters).')
+    origin = environment.get('RENDER_EXTERNAL_URL', '').rstrip('/')
+    if not re.fullmatch(r'https://[a-z0-9-]+\.onrender\.com', origin):
+        raise RuntimeError('Render must provide a valid RENDER_EXTERNAL_URL for the web service.')
+    port = int(environment.get('PORT', '10000'))
+    if port == 8011 or not 1 <= port <= 65535:
+        raise RuntimeError('Choose a valid Render PORT different from BridgeCLI port 8011.')
+    data = Path('/var/data')
+    for directory, uid in ((data / 'web', 10001), (data / 'engine', 10002)):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chown(directory, uid, uid)
+        directory.chmod(0o700)
+    environment.pop('SHIFT_BRIDGE_ALB_ARN', None)
+    return data, {
+        'PORT': str(port), 'SHIFT_BRIDGE_PUBLIC_ORIGIN': origin,
+        'SHIFT_BRIDGE_WEB_USER': username,
+        'SHIFT_BRIDGE_WEB_CREDENTIAL': hashlib.sha256(f'{username}:{password}'.encode()).hexdigest(),
+    }
 
 
 def main():
@@ -17,17 +45,23 @@ def main():
 
     signal.signal(signal.SIGTERM, shutdown)
     environment = dict(os.environ)
-    environment.pop('GEMINI_API_KEY', None)
-    key = Path('/run/shift-bridge/gemini.key').read_text(encoding='utf-8').strip()
-    if not key:
-        raise RuntimeError('The mounted Gemini credential is empty.')
+    key = environment.pop('GEMINI_API_KEY', '').strip()
+    environment.pop('SHIFT_BRIDGE_WEB_CREDENTIAL', None)
+    on_render = environment.get('RENDER') == 'true'
+    if on_render:
+        data, web_settings = render_settings(environment)
+    else:
+        key = Path('/run/shift-bridge/gemini.key').read_text(encoding='utf-8').strip()
+        if not key:
+            raise RuntimeError('The mounted Gemini credential is empty.')
+        data, web_settings = Path('/data'), {'PORT': '8000'}
     token = secrets.token_urlsafe(32)
     engine_port = '8011'
     engine_url = f'http://127.0.0.1:{engine_port}'
     shared = {**environment, 'HYBRID_API_AUTH_TOKEN': token}
-    engine_env = {**shared, 'GEMINI_API_KEY': key, 'BRIDGE_PORT': engine_port, 'BRIDGE_DATA_DIR': '/data/engine'}
-    web_env = {**shared, 'PORT': '8000', 'SHIFT_BRIDGE_WEB_HOST': '0.0.0.0',
-               'SHIFT_BRIDGE_DB_PATH': '/data/web/shift_bridge.db', 'SHIFT_BRIDGE_SEED_DEMO': '0',
+    engine_env = {**shared, 'GEMINI_API_KEY': key, 'BRIDGE_PORT': engine_port, 'BRIDGE_DATA_DIR': str(data / 'engine')}
+    web_env = {**shared, **web_settings, 'SHIFT_BRIDGE_WEB_HOST': '0.0.0.0',
+               'SHIFT_BRIDGE_DB_PATH': str(data / 'web/shift_bridge.db'), 'SHIFT_BRIDGE_SEED_DEMO': '0',
                'SHIFT_BRIDGE_ENGINE_URL': engine_url}
     processes = []
     try:
@@ -45,7 +79,7 @@ def main():
             except OSError:
                 time.sleep(0.25)
                 continue
-            if health.get('api_key_configured') and health.get('auth_configured'):
+            if health.get('auth_configured') and (on_render or health.get('api_key_configured')):
                 break
         else:
             raise RuntimeError('BridgeCLI did not start.')
