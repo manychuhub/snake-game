@@ -408,7 +408,7 @@ function transferVoiceToLog() {
     }
 
     document.getElementById("rawLogInput").value = textToTransfer;
-    switchTab("tab-classify", document.querySelectorAll(".nav-tab")[0]);
+    switchTab("tab-classify", document.querySelector('[aria-controls="tab-classify"]'));
     analyzeAndClassifyLog();
 }
 

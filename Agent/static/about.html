@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="SHIFT BRIDGE의 에이전트 구조, 교대 업무 처리 흐름과 개발 기록을 살펴보세요.">
+    <title>에이전트 소개 · SHIFT BRIDGE</title>
+    <link rel="stylesheet" href="/about.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="/about.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+        <div class="wrap header-inner">
+            <a class="wordmark" href="#top" aria-label="SHIFT BRIDGE 맨 위로">
+                <span class="brand-icon" aria-hidden="true">SB</span><strong>SHIFT BRIDGE</strong>
+            </a>
+            <nav class="section-nav" aria-label="소개 페이지 목차">
+                <a href="#structure">에이전트 구조</a>
+                <a href="#agents">에이전트 소개</a>
+                <a href="#how">작동 원리</a>
+                <a href="#log">오늘 작업 기록</a>
+            </nav>
+            <a class="button header-action" href="/">업무 화면 <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+        </div>
+    </header>
+
+    <main id="main">
+        <section class="hero" id="top" aria-labelledby="intro-title">
+            <div class="wrap hero-layout">
+                <div>
+                    <p class="eyebrow"><span class="signal" aria-hidden="true"></span> AWS DCO 교대 인수인계 도구</p>
+                    <h1 id="intro-title">현장 기록에서,<br><em>다음 교대의 계획까지.</em></h1>
+                    <p class="lead">근무 중에 남긴 메모와 음성을 업무 기록으로 정리합니다. 다음 근무조가 미완료 업무와 후속 조치를 바로 확인할 수 있도록 인수인계 보고서 초안을 만듭니다.</p>
+                    <div class="hero-actions">
+                        <a class="button primary" href="#how">작동 원리 보기 <i class="fa-solid fa-arrow-down" aria-hidden="true"></i></a>
+                        <a class="button" href="/">업무 화면 열기 <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+                    </div>
+                </div>
+
+                <figure class="record-preview" aria-label="가상의 인수인계 기록 예시">
+                    <div class="preview-top">
+                        <span><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> 교대 인수인계</span>
+                        <span class="example-label">가상 기록</span>
+                    </div>
+                    <div class="preview-body">
+                        <div class="preview-summary">
+                            <span class="caption">야간조 <span aria-hidden="true">→</span> 주간조</span>
+                            <strong>서버 전원 모듈 교체</strong>
+                        </div>
+                        <div class="note-example"><span>현장 메모</span><p>전원 모듈 교체 후 정상 복귀. 다음 조에서 경보가 다시 발생하는지 확인.</p></div>
+                        <dl class="preview-fields">
+                            <div><dt>조치 결과</dt><dd><span class="signal" aria-hidden="true"></span> 정상 복귀</dd></div>
+                            <div><dt>티켓 번호</dt><dd>미확인</dd></div>
+                            <div><dt>다음 교대 작업</dt><dd>전원 경보 재발 확인</dd></div>
+                        </dl>
+                    </div>
+                </figure>
+            </div>
+        </section>
+
+        <section class="section wrap" id="structure" aria-labelledby="structure-title">
+            <div class="section-heading">
+                <p class="eyebrow">에이전트 구조</p>
+                <h2 id="structure-title">웹과 터미널이 AI 엔진을 공유합니다</h2>
+                <p>웹 서버는 화면과 업무 데이터를 관리하고, BridgeCLI는 인증된 로컬 API로 요청을 받아 Gemini를 호출합니다.</p>
+            </div>
+            <div class="structure-panel">
+                <ol class="architecture" aria-label="웹 업무 요청이 이동하는 순서">
+                    <li><i class="fa-solid fa-window-maximize" aria-hidden="true"></i><h3>브라우저</h3><p>기록 입력 · 결과 검토</p></li>
+                    <li><i class="fa-solid fa-server" aria-hidden="true"></i><h3>SHIFT BRIDGE 웹 서버</h3><p>인증 · 보고서 승인</p></li>
+                    <li><i class="fa-solid fa-terminal" aria-hidden="true"></i><h3>BridgeCLI</h3><p>요청 처리 · Gemini 키 관리</p></li>
+                    <li><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i><h3>Gemini API</h3><p>분류 · 요약 · 번역 생성</p></li>
+                </ol>
+                <div class="structure-notes">
+                    <div><i class="fa-solid fa-database" aria-hidden="true"></i><span><strong>SQLite 저장소</strong> 웹과 CLI가 업무 기록과 보고서를 각자의 DB에 보관합니다.</span></div>
+                    <div><i class="fa-solid fa-key" aria-hidden="true"></i><span><strong>AI 키 관리</strong> Gemini 키는 서버 환경에 보관하고 BridgeCLI가 사용합니다.</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section wrap" id="agents" aria-labelledby="agents-title">
+            <div class="section-heading">
+                <p class="eyebrow">에이전트 소개</p>
+                <h2 id="agents-title">근무 중에 사용할 세 가지 기능</h2>
+            </div>
+            <div class="feature-grid">
+                <article class="feature-card">
+                    <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+                    <h3>업무 기록 분류</h3>
+                    <p>메모나 정제된 음성 내용을 장비 ID, 티켓, 작업 결과 등 11개 필드로 정리하고 누락된 정보를 확인할 질문을 제안합니다.</p>
+                </article>
+                <article class="feature-card">
+                    <i class="fa-solid fa-file-lines" aria-hidden="true"></i>
+                    <h3>교대 보고서 초안</h3>
+                    <p>교대 기간의 기록과 이전 미완료 업무를 모아 8개 섹션으로 초안을 작성합니다. 담당자가 편집한 뒤 최종 승인합니다.</p>
+                </article>
+                <article class="feature-card">
+                    <i class="fa-solid fa-comments" aria-hidden="true"></i>
+                    <h3>Ops 에이전트</h3>
+                    <p>자연어로 완료·미완료 기록과 장비 장애 이력을 찾거나 반복 장애 통계를 조회합니다. 기술 문서와 SOP는 웹의 지식 검색에서도 확인할 수 있습니다.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section wrap" id="how" aria-labelledby="how-title">
+            <div class="section-heading">
+                <p class="eyebrow">에이전트 작동 원리</p>
+                <h2 id="how-title">요청 하나의 경로를 따라가 보세요</h2>
+                <p>업무 기록을 분류하거나 교대 보고서를 만들 때, 어느 구성 요소에서 어떤 일을 하는지 볼 수 있습니다.</p>
+            </div>
+            <div class="flow" id="flow">
+                <div class="flow-toolbar">
+                    <div class="choice-set" role="group" aria-label="업무 흐름 선택">
+                        <button type="button" data-flow="classify" aria-pressed="true">업무 기록 분류</button>
+                        <button type="button" data-flow="report" aria-pressed="false">교대 보고서</button>
+                    </div>
+                    <div class="flow-controls" role="group" aria-label="단계 재생 제어">
+                        <button type="button" id="flow-prev" aria-label="이전 단계" disabled><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+                        <button type="button" id="flow-play" aria-pressed="false"><i class="fa-solid fa-play" aria-hidden="true"></i><span>재생</span></button>
+                        <button type="button" id="flow-next" aria-label="다음 단계"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+                    </div>
+                </div>
+                <ol class="flow-nodes" aria-label="요청 처리 구성 요소">
+                    <li data-node="browser" class="active"><i class="fa-solid fa-window-maximize" aria-hidden="true"></i> 브라우저</li>
+                    <li data-node="web"><i class="fa-solid fa-server" aria-hidden="true"></i> 웹 서버</li>
+                    <li data-node="bridge"><i class="fa-solid fa-terminal" aria-hidden="true"></i> BridgeCLI</li>
+                    <li data-node="gemini"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Gemini</li>
+                    <li data-node="sqlite"><i class="fa-solid fa-database" aria-hidden="true"></i> SQLite</li>
+                </ol>
+                <div class="flow-detail">
+                    <div id="flow-progress" class="flow-progress" role="group" aria-label="단계 바로가기"></div>
+                    <div class="step" aria-live="polite" aria-atomic="true">
+                        <p class="step-caption"><span id="step-count">01 / 06</span><span id="step-node">브라우저</span></p>
+                        <h3 id="step-title">근무 중에 남긴 메모를 입력합니다</h3>
+                        <p id="step-text">발생 시각, 증상, 조치 결과, 다음 근무자가 확인할 내용을 적고 AI 자동 분류를 누릅니다.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section wrap" id="log" aria-labelledby="log-title">
+            <div class="section-heading">
+                <p class="eyebrow">개발 일지</p>
+                <h2 id="log-title">오늘 작업 기록</h2>
+                <p><time datetime="2026-11-18">2026.11.18</time> · 한국 시간</p>
+            </div>
+            <ol class="timeline">
+                <li><time datetime="2026-11-18T15:47:17+09:00">15:47</time><div><h3>SHIFT BRIDGE 소스 업로드</h3><p>Windows 실행 파일, 웹앱, BridgeCLI, 배포 설정을 GitHub의 <code>shift-bridge</code> 브랜치에 올렸습니다.</p><a href="https://github.com/manychuhub/snake-game/commit/741a275e3f428e084f2b8747fb7e976fcb014779">커밋 741a275 <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></div></li>
+                <li><time datetime="2026-11-18T16:06:27+09:00">16:06</time><div><h3>Render 실행 환경과 웹 로그인 연결</h3><p>Render가 지정한 포트로 웹을 실행하고, 서비스 환경변수에서 Gemini 키를 읽도록 구성했습니다.</p><a href="https://github.com/manychuhub/snake-game/commit/c8af6c26159e3d027c732239ad684ce903e2671c">커밋 c8af6c2 <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></div></li>
+                <li><time datetime="2026-11-18T16:08:48+09:00">16:08</time><div><h3>컨테이너 기동 및 로그인 검증</h3><p>GitHub Actions에서 Docker 기동, 로그인 전 접근 차단, 로그인 후 API 응답을 확인했습니다.</p><a href="https://github.com/manychuhub/snake-game/actions/runs/44256608028">검증 결과 <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></div></li>
+                <li><span class="timeline-time">오늘</span><div><h3>에이전트 소개 페이지 추가</h3><p>실제 코드에 맞춰 웹과 BridgeCLI의 역할을 정리하고, 분류와 보고서 요청을 단계별로 볼 수 있게 만들었습니다.</p></div></li>
+            </ol>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="wrap footer-inner"><span>SHIFT BRIDGE</span><a href="https://github.com/manychuhub/snake-game/tree/shift-bridge">GitHub 소스 보기 <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></div>
+    </footer>
+</body>
+</html>

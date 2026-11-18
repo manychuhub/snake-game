@@ -23,7 +23,8 @@ import database as db
 import gemini_client as gemini
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-STATIC_PATHS = {'/', '/index.html', '/style.css', '/app.js'}
+STATIC_ALIASES = {'/': '/index.html', '/about': '/about.html', '/about/': '/about.html'}
+STATIC_PATHS = {'/index.html', '/style.css', '/app.js', '/about.html', '/about.css', '/about.js'}
 
 PORT = int(os.environ.get("PORT", 8000))
 HOST = os.getenv('SHIFT_BRIDGE_WEB_HOST', '127.0.0.1')
@@ -137,9 +138,7 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
         if self.path == '/healthz':
             return self.send_json({'status': 'ok'})
         if self.authorize():
-            if urllib.parse.urlsplit(self.path).path in STATIC_PATHS:
-                return super().do_HEAD()
-            self.send_json({'error': '알 수 없는 경로입니다.'}, 404)
+            self.serve_static(urllib.parse.urlsplit(self.path).path, head=True)
 
     def route_get(self):
         parsed_url = urllib.parse.urlparse(self.path)
@@ -178,11 +177,15 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
                 "signed_in_as": self.subject,
             })
 
-        # 2. 정적 HTML 파일 서빙
-        if path not in STATIC_PATHS:
+        self.serve_static(path)
+
+    def serve_static(self, path, *, head=False):
+        self.path = STATIC_ALIASES.get(path, path)
+        if self.path not in STATIC_PATHS:
             return self.send_json({'error': '알 수 없는 경로입니다.'}, 404)
-        self.path = '/index.html' if path == '/' else path
-        super().do_GET()
+        if head:
+            return super().do_HEAD()
+        return super().do_GET()
 
     # ==========================================================================
     # POST 요청 라우팅

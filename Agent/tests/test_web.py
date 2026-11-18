@@ -44,6 +44,7 @@ class WebTests(unittest.TestCase):
               patch.object(app, 'verified_subject', return_value=None, create=True) as verify):
             self.assertEqual(self.request('GET', '/healthz')[0], 200)
             self.assertEqual(self.request('GET', '/api/logs')[0], 401)
+            self.assertEqual(self.request('GET', '/about')[0], 401)
             verify.return_value = 'authenticated-user-id'
             self.assertEqual(self.request('POST', '/api/logs/delete', {'id': 1}, {'Origin': 'https://other.example'})[0], 403)
             self.assertEqual(self.request('POST', '/api/logs/delete', [], {'Origin': origin})[0], 400)
