@@ -108,6 +108,11 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-
 .structure-notes i { color: var(--violet); }
 .structure-notes strong { color: var(--text); margin-right: 5px; }
 
+.bridge-explainer { padding: 17px 23px; border-top: 1px solid var(--line); background: #151e30; }
+.bridge-explainer h3 { color: var(--blue); font-size: 1rem; }
+.bridge-explainer p { margin-top: 5px; max-width: 88ch; color: var(--muted); font-size: .88rem; word-break: keep-all; }
+.bridge-explainer code { color: var(--violet); }
+
 .feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
 .feature-card { padding: 21px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .feature-card > i { padding: 10px; border-radius: 8px; background: #20304d; }
@@ -171,7 +176,7 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-
     .section { padding-block: 38px; }
     .architecture { grid-template-columns: 1fr; gap: 22px; padding: 16px; }
     .architecture li:not(:last-child)::after { content: "↓"; top: calc(100% - 2px); left: 50%; transform: translateX(-50%); }
-    .structure-notes { padding: 14px 16px; }
+    .structure-notes, .bridge-explainer { padding: 14px 16px; }
     .flow-nodes { gap: 5px; padding: 13px 8px; }
     .flow-nodes li { font-size: .72rem; }
     .flow-toolbar, .flow-detail { padding-inline: 12px; }
