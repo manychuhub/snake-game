@@ -1,0 +1,405 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SHIFT BRIDGE private AWS pilot with authenticated HTTPS and in-place releases
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  LoadBalancerSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Two private subnets in different AZs, with HTTPS egress to Cognito.
+  ApplicationSubnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet with outbound HTTPS access to AWS and Gemini.
+  ClientCidr:
+    Type: String
+    Description: IPv4 CIDR of the approved corporate network or VPN.
+    AllowedPattern: '^[0-9.]+/[0-9]{1,2}$'
+  WebHostname:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]+[a-z0-9]$'
+  CertificateArn:
+    Type: String
+  CognitoDomainPrefix:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9-]+[a-z0-9]$'
+  GeminiSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
+    Description: Existing regional Secrets Manager secret with a GEMINI_API_KEY JSON field and the default managed KMS key.
+  GeminiModel:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_.-]+$'
+    Description: Approved Gemini model ID, without the models/ prefix.
+  GitHubRepository:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+  GitHubReleaseBranch:
+    Type: String
+    Default: shift-bridge
+    AllowedValues: [main, shift-bridge]
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SHIFT BRIDGE HTTPS ingress from the approved network
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref ClientCidr}
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+
+  HostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Web ingress from the SHIFT BRIDGE load balancer only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup}
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+
+  LoadBalancerWebEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
+      DestinationSecurityGroupId: !Ref HostSecurityGroup
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      Type: application
+      Subnets: !Ref LoadBalancerSubnets
+      SecurityGroups: [!Ref LoadBalancerSecurityGroup]
+      LoadBalancerAttributes:
+        - {Key: idle_timeout.timeout_seconds, Value: '180'}
+        - {Key: routing.http.drop_invalid_header_fields.enabled, Value: 'true'}
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      MfaConfiguration: 'ON'
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - {Name: verified_email, Priority: 1}
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid]
+      CallbackURLs: [!Sub 'https://${WebHostname}/oauth2/idpresponse']
+      SupportedIdentityProviders: [COGNITO]
+      PreventUserExistenceErrors: ENABLED
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref UserPool
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Certificates: [{CertificateArn: !Ref CertificateArn}]
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: authenticate-cognito
+          Order: 1
+          AuthenticateCognitoConfig:
+            UserPoolArn: !GetAtt UserPool.Arn
+            UserPoolClientId: !Ref UserPoolClient
+            UserPoolDomain: !Ref UserPoolDomain
+            Scope: openid
+            SessionTimeout: 3600
+            OnUnauthenticatedRequest: authenticate
+        - Type: forward
+          Order: 2
+          TargetGroupArn: !Ref WebTargets
+
+  WebTargets:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      TargetType: instance
+      Protocol: HTTP
+      Port: 8000
+      HealthCheckPath: /healthz
+      Targets: [{Id: !Ref Host}]
+
+  HostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: DownloadShiftBridge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]
+                Resource: !GetAtt Repository.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref GeminiSecretArn
+
+  HostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref HostRole]
+
+  Host:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.small
+      IamInstanceProfile: !Ref HostProfile
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: false
+          SubnetId: !Ref ApplicationSubnet
+          GroupSet: [!Ref HostSecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {Encrypted: true, DeleteOnTermination: false, VolumeSize: 30, VolumeType: gp3}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          dnf install -y docker awscli-2
+          install -d -m 0700 /opt/shift-bridge
+          install -d -m 0755 /var/lib/shift-bridge/data
+          install -d -m 0700 -o 10001 -g 10001 /var/lib/shift-bridge/data/web
+          install -d -m 0700 -o 10002 -g 10002 /var/lib/shift-bridge/data/engine
+          cat > /opt/shift-bridge/config <<'CONFIG'
+          AWS_REGION='${AWS::Region}'
+          GEMINI_SECRET='${GeminiSecretArn}'
+          REPOSITORY='${Repository.RepositoryUri}'
+          ALB_ARN='${LoadBalancer.LoadBalancerArn}'
+          WEB_ORIGIN='https://${WebHostname}'
+          GEMINI_MODEL='${GeminiModel}'
+          CONFIG
+          chmod 0600 /opt/shift-bridge/config
+          cat > /opt/shift-bridge/read-secret <<'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+          source /opt/shift-bridge/config
+          umask 077
+          dir=/run/shift-bridge
+          install -d -m 0700 "$dir"
+          temp=$(mktemp "$dir/.gemini.XXXXXXXX")
+          trap 'rm -f "$temp"' EXIT
+          aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$GEMINI_SECRET" --query SecretString --output text \
+            | python3 -c 'import json,sys; key=json.load(sys.stdin).get("GEMINI_API_KEY"); sys.exit("Invalid Gemini secret") if not isinstance(key,str) or not key.strip() else print(key.strip())' > "$temp"
+          mv -f "$temp" "$dir/gemini.key"
+          SCRIPT
+          chmod 0700 /opt/shift-bridge/read-secret
+          cat > /etc/systemd/system/shift-bridge.service <<'UNIT'
+          [Unit]
+          Description=Restore SHIFT BRIDGE credential and container on boot
+          Wants=network-online.target
+          Requires=docker.service
+          After=network-online.target docker.service
+          StartLimitIntervalSec=0
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/bash -c 'if docker container inspect shift-bridge > /dev/null 2>&1; then /opt/shift-bridge/read-secret && { [ "$(docker inspect -f "{{.State.Running}}" shift-bridge)" = true ] || docker start shift-bridge; }; fi'
+          Restart=on-failure
+          RestartSec=15
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now docker shift-bridge.service
+
+  ReleaseCommand:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Command
+      DocumentFormat: YAML
+      UpdateMethod: NewVersion
+      TargetType: /AWS::EC2::Instance
+      Content:
+        schemaVersion: '2.2'
+        description: Install a specific SHIFT BRIDGE image and restore the previous release on failed health checks.
+        parameters:
+          ImageTag:
+            type: String
+            allowedPattern: '^[a-f0-9]{40}$'
+            interpolationType: ENV_VAR
+        mainSteps:
+          - action: aws:runShellScript
+            name: release
+            inputs:
+              timeoutSeconds: '540'
+              runCommand:
+                - |
+                  # The tag is restricted to a commit SHA by this document and by bash.
+                  bash -euo pipefail <<'RELEASE'
+                  tag="${SSM_ImageTag:-{{ImageTag}}}"
+                  [[ "$tag" =~ ^[a-f0-9]{40}$ ]]
+                  exec 9>/run/shift-bridge-release.lock
+                  flock -n 9
+                  source /opt/shift-bridge/config
+                  /opt/shift-bridge/read-secret
+                  export DOCKER_CONFIG=$(mktemp -d /run/shift-bridge-docker.XXXXXXXX)
+                  trap 'rm -f "$DOCKER_CONFIG/config.json"; rmdir "$DOCKER_CONFIG"' EXIT
+                  registry=${REPOSITORY%%/*}
+                  aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
+                  image="$REPOSITORY:$tag"
+                  docker pull "$image"
+                  current=shift-bridge
+                  previous=shift-bridge-previous
+                  if docker container inspect "$previous" >/dev/null 2>&1; then
+                    if ! docker container inspect "$current" >/dev/null 2>&1; then
+                      docker rename "$previous" "$current"
+                      docker start "$current"
+                    else
+                      docker rm "$previous"
+                    fi
+                  fi
+                  if docker container inspect "$current" >/dev/null 2>&1; then
+                    docker rename "$current" "$previous"
+                  fi
+                  committed=0
+                  finish() {
+                    status=$?
+                    if [ "$committed" = 0 ]; then
+                      docker rm -f "$current" >/dev/null 2>&1 || true
+                      if docker container inspect "$previous" >/dev/null 2>&1; then
+                        docker rename "$previous" "$current" && docker start "$current"
+                      fi
+                    fi
+                    rm -f "$DOCKER_CONFIG/config.json"
+                    rmdir "$DOCKER_CONFIG"
+                    exit "$status"
+                  }
+                  trap finish EXIT
+                  trap 'exit 1' TERM INT
+                  if docker container inspect "$previous" >/dev/null 2>&1; then
+                    docker stop "$previous"
+                  fi
+                  install -d -m 0700 /var/lib/shift-bridge/backup
+                  python3 - <<'BACKUP'
+                  from pathlib import Path
+                  import sqlite3
+                  from contextlib import closing
+
+                  for name in ('web/shift_bridge.db', 'engine/bridge.db'):
+                      source = Path('/var/lib/shift-bridge/data', name)
+                      if source.is_file():
+                          backup = Path('/var/lib/shift-bridge/backup', source.name)
+                          temp = backup.with_suffix('.tmp')
+                          temp.unlink(missing_ok=True)
+                          with closing(sqlite3.connect(f'{source.as_uri()}?mode=ro', uri=True)) as src:
+                              with closing(sqlite3.connect(temp)) as dst:
+                                  src.backup(dst)
+                          temp.replace(backup)
+                  BACKUP
+                  docker run -d --name "$current" --restart unless-stopped --init --read-only \
+                    --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL \
+                    --security-opt no-new-privileges --pids-limit 128 \
+                    --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+                    --log-opt max-size=10m --log-opt max-file=3 \
+                    --mount type=bind,src=/var/lib/shift-bridge/data,dst=/data \
+                    --mount type=bind,src=/run/shift-bridge/gemini.key,dst=/run/shift-bridge/gemini.key,readonly \
+                    -e SHIFT_BRIDGE_ALB_ARN="$ALB_ARN" -e SHIFT_BRIDGE_PUBLIC_ORIGIN="$WEB_ORIGIN" \
+                    -e GEMINI_MODEL="$GEMINI_MODEL" -p 8000:8000 "$image"
+                  for check in {1..30}; do
+                    if curl --fail --silent --max-time 2 http://127.0.0.1:8000/healthz >/dev/null; then
+                      committed=1
+                      echo "Deployed $tag"
+                      exit 0
+                    fi
+                    sleep 2
+                  done
+                  echo 'Health checks failed. Restoring the previous release.' >&2
+                  exit 1
+                  RELEASE
+
+  GitHubReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:ref:refs/heads/${GitHubReleaseBranch}
+      Policies:
+        - PolicyName: PublishShiftBridge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [ecr:GetAuthorizationToken, ssm:GetCommandInvocation]
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:DescribeImages, ecr:BatchCheckLayerAvailability, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload, ecr:PutImage]
+                Resource: !GetAtt Repository.Arn
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${ReleaseCommand}
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Host}
+
+Outputs:
+  WebUrl:
+    Value: !Sub https://${WebHostname}
+  PrivateDnsTarget:
+    Value: !GetAtt LoadBalancer.DNSName
+  CognitoUserPool:
+    Value: !Ref UserPool
+  ReleaseRoleArn:
+    Value: !GetAtt GitHubReleaseRole.Arn
+  EcrRepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+  ReleaseDocument:
+    Value: !Ref ReleaseCommand
+  ApplicationInstance:
+    Value: !Ref Host

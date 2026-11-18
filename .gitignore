@@ -1,12 +1,7 @@
-# 운영체제 임시 파일
-Thumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# 에디터 및 설정 파일
-.vscode/
-.idea/
-
-# 로그 및 환경 설정
-*.log
 .env
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-*
+uploads/
