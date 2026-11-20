@@ -13,11 +13,37 @@ let isRecording = false;
 const demoMode = ["/demo", "/demo/"].includes(window.location.pathname);
 
 function requestApi(path, options) {
-    if (!demoMode) return fetch(path, options);
+    if (!demoMode) {
+        return fetch(path, options).then(response => {
+            if (response.status === 401) location.replace("/login");
+            if (options?.method === "POST") refreshAccount().catch(console.error);
+            return response;
+        });
+    }
     if ((options?.method || "GET") !== "GET") {
         return Promise.reject(new Error("가상 기록을 보는 공개 체험입니다."));
     }
     return fetch(`/demo${path}`);
+}
+
+async function refreshAccount() {
+    const response = await fetch("/api/account/me");
+    if (response.status === 401) {
+        location.replace("/login");
+        return;
+    }
+    if (!response.ok) return;
+    const account = await response.json();
+    document.getElementById("activeOperatorName").textContent = account.username;
+    for (const id of ["reportAuthor", "approverNameInput"]) {
+        const field = document.getElementById(id);
+        field.value = account.username;
+        field.readOnly = true;
+    }
+    document.getElementById("aiQuota").textContent = account.remaining === null
+        ? "AI 생성 한도 면제" : `오늘 AI 생성 ${account.remaining}/3회 남음`;
+    document.getElementById("adminLink").hidden = !account.admin;
+    document.getElementById("engineButton").hidden = !account.admin;
 }
 
 // 페이지 초기화
@@ -39,7 +65,14 @@ document.addEventListener("DOMContentLoaded", () => {
         for (const control of document.querySelectorAll("main button:not(.btn-filter)")) control.disabled = true;
         for (const zone of document.querySelectorAll(".upload-zone, #micBtn")) zone.inert = true;
     } else {
-        checkApiKeyStatus();
+        refreshAccount().catch(console.error);
+        document.getElementById("logoutButton").hidden = false;
+        document.getElementById("logoutButton").addEventListener("click", async () => {
+            const response = await fetch("/api/account/logout", {
+                method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"
+            });
+            if (response.ok || response.status === 401) location.replace("/login");
+        });
     }
     loadWorkLogs();
     loadTechnicalDocs();
@@ -274,7 +307,7 @@ async function loadWorkLogs(statusFilter = null) {
             `;
         }).join("");
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="10" style="color: #f87171; text-align: center;">로딩 실패: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="color: #f87171; text-align: center;">로딩 실패: ${escapeHtml(e.message)}</td></tr>`;
     }
 }
 
@@ -424,7 +457,7 @@ async function handleAudioFileUpload(event) {
 
             statusEl.innerHTML = `<span style="color: #10b981;">✅ '${escapeHtml(file.name)}' 음성 처리 완료!</span>`;
         } catch (e) {
-            statusEl.innerHTML = `<span style="color: #f87171;">음성 처리 실패: ${e.message}</span>`;
+            statusEl.innerHTML = `<span style="color: #f87171;">음성 처리 실패: ${escapeHtml(e.message)}</span>`;
         }
     };
     reader.readAsDataURL(file);
@@ -494,7 +527,7 @@ async function generateComprehensiveReport() {
 
         loadHandoverReports();
     } catch (e) {
-        view.innerHTML = `<div style="color: #f87171; padding: 20px;">생성 실패: ${e.message}</div>`;
+        view.innerHTML = `<div style="color: #f87171; padding: 20px;">생성 실패: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -658,7 +691,7 @@ async function executeRagQuery() {
             }).join("");
         }
     } catch (e) {
-        answerText.innerHTML = `<span style="color: #f87171;">검색 오류: ${e.message}</span>`;
+        answerText.innerHTML = `<span style="color: #f87171;">검색 오류: ${escapeHtml(e.message)}</span>`;
     }
 }
 
@@ -763,7 +796,7 @@ async function executeDocQa() {
 
         renderMarkdownInto(data.answer, resBox);
     } catch (e) {
-        resBox.innerHTML = `<span style="color: #f87171;">오류: ${e.message}</span>`;
+        resBox.innerHTML = `<span style="color: #f87171;">오류: ${escapeHtml(e.message)}</span>`;
     }
 }
 
@@ -839,7 +872,7 @@ async function requestAnomalyExplanation() {
         const data = await res.json();
         renderMarkdownInto(data.explanation || "분석 결과를 생성하지 못했습니다.", box);
     } catch (e) {
-        box.innerHTML = `<div style="color: #f87171;">해석 실패: ${e.message}</div>`;
+        box.innerHTML = `<div style="color: #f87171;">해석 실패: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -923,7 +956,7 @@ async function executeTranslation() {
         const data = await res.json();
         resBox.textContent = data.translated_text || "번역 결과를 가져올 수 없습니다.";
     } catch (e) {
-        resBox.innerHTML = `<span style="color: #f87171;">번역 실패: ${e.message}</span>`;
+        resBox.innerHTML = `<span style="color: #f87171;">번역 실패: ${escapeHtml(e.message)}</span>`;
     }
 }
 
@@ -989,7 +1022,7 @@ async function sendAgentMessage() {
 
         aiBubble.innerHTML = contentHtml;
     } catch (e) {
-        aiBubble.innerHTML = `<span style="color: #f87171;">오류: ${e.message}</span>`;
+        aiBubble.innerHTML = `<span style="color: #f87171;">오류: ${escapeHtml(e.message)}</span>`;
     } finally {
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
@@ -1004,9 +1037,10 @@ async function loadEfficiencyImprovements() {
     try {
         const res = await requestApi("/api/improvements", { method: "POST" });
         const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
         renderMarkdownInto(data.improvements || "개선안을 불러오지 못했습니다.", container);
     } catch (e) {
-        container.innerHTML = `<div style="color: #f87171;">개선안 로드 오류: ${e.message}</div>`;
+        container.innerHTML = `<div style="color: #f87171;">개선안 로드 오류: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -1016,6 +1050,7 @@ async function loadEfficiencyImprovements() {
 
 function openApiKeyModal() {
     document.getElementById("apiKeyModal").style.display = "flex";
+    checkApiKeyStatus();
 }
 
 function closeApiKeyModal() {
@@ -1068,7 +1103,7 @@ async function testApiKeyConnection() {
     } catch (e) {
         resultBox.style.display = "block";
         resultBox.className = "test-result-box fail";
-        resultBox.innerHTML = `<strong><i class="fa-solid fa-circle-xmark"></i> 통신 오류:</strong> ${e.message}`;
+        resultBox.innerHTML = `<strong><i class="fa-solid fa-circle-xmark"></i> 통신 오류:</strong> ${escapeHtml(e.message)}`;
     } finally {
         btn.disabled = false;
         btn.innerHTML = `<i class="fa-solid fa-network-wired"></i> 연결 테스트`;

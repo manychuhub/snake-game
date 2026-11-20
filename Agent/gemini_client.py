@@ -13,6 +13,10 @@ import json
 import time
 import urllib.request
 from urllib.error import HTTPError
+from contextlib import nullcontext
+from contextvars import ContextVar
+
+generation_tracker = ContextVar("generation_tracker", default=nullcontext)
 
 class BridgeError(Exception):
     pass
@@ -44,6 +48,8 @@ def get_bridge_health():
 
 
 def call_gemini_raw(payload):
+    if not os.environ.get("SHIFT_BRIDGE_ENGINE_URL") or not os.environ.get("HYBRID_API_AUTH_TOKEN"):
+        raise BridgeError("BridgeCLI 연결 설정을 확인하세요.")
     request = urllib.request.Request(
         os.environ["SHIFT_BRIDGE_ENGINE_URL"] + "/v1/web/generate",
         data=json.dumps(payload).encode("utf-8"),
@@ -53,7 +59,8 @@ def call_gemini_raw(payload):
         },
     )
     try:
-        return bridge_opener.open(request, timeout=120)
+        with generation_tracker.get()():
+            return bridge_opener.open(request, timeout=120)
     except HTTPError as error:
         with error:
             message = "AI 요청이 많습니다. 잠시 후 다시 시도하세요." if error.code == 429 else "BridgeCLI 또는 Gemini 요청에 실패했습니다."

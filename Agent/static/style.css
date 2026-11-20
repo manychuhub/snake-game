@@ -160,6 +160,7 @@ body {
     cursor: pointer;
 }
 .btn-api-key:hover { border-color: var(--accent); }
+.btn-api-key[hidden] { display: none; }
 
 .demo-mode .btn-api-key,
 .demo-mode #workLogsTbody button,

@@ -13,18 +13,22 @@ import json
 import time
 import datetime
 from contextlib import contextmanager, closing
+from contextvars import ContextVar
 from pathlib import Path
 
 DB_PATH = Path(os.getenv("SHIFT_BRIDGE_DB_PATH", Path(__file__).resolve().parent / "shift_bridge.db"))
 
+workspace_db = ContextVar('workspace_db', default=None)
+
+
 @contextmanager
-def get_connection():
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+def get_connection(path=None):
+    with closing(sqlite3.connect(path or workspace_db.get() or DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         with conn:
             yield conn
 
-def init_db():
+def init_db(*, seed=True):
     """데이터베이스 스키마 초기화 및 샘플 데이터 시딩"""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -134,7 +138,7 @@ def init_db():
 
         # 샘플 AWS DCO 현장 데이터 시딩
         cursor.execute("SELECT COUNT(*) FROM work_logs;")
-        if cursor.fetchone()[0] == 0 and os.getenv("SHIFT_BRIDGE_SEED_DEMO", "1") == "1":
+        if seed and cursor.fetchone()[0] == 0 and os.getenv("SHIFT_BRIDGE_SEED_DEMO", "1") == "1":
             seed_sample_data(cursor)
 
         conn.commit()

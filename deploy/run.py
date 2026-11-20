@@ -1,6 +1,5 @@
 """Run a single web process and its loopback-only BridgeCLI engine."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,11 +13,11 @@ import urllib.request
 
 
 def render_settings(environment):
-    username = environment.pop('SHIFT_BRIDGE_WEB_USER', 'operator')
+    username = environment.pop('SHIFT_BRIDGE_WEB_USER', 'admin')
     password = environment.pop('SHIFT_BRIDGE_WEB_PASSWORD', '')
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', username):
         raise RuntimeError('SHIFT_BRIDGE_WEB_USER must use letters, numbers, dots, underscores or dashes.')
-    if not 24 <= len(password) <= 256:
+    if password and not 24 <= len(password) <= 256:
         raise RuntimeError('Set SHIFT_BRIDGE_WEB_PASSWORD to a long random password (24–256 characters).')
     origin = environment.get('RENDER_EXTERNAL_URL', '').rstrip('/')
     if not re.fullmatch(r'https://[a-z0-9-]+\.onrender\.com', origin):
@@ -34,8 +33,8 @@ def render_settings(environment):
     environment.pop('SHIFT_BRIDGE_ALB_ARN', None)
     return data, {
         'PORT': str(port), 'SHIFT_BRIDGE_PUBLIC_ORIGIN': origin,
-        'SHIFT_BRIDGE_WEB_USER': username,
-        'SHIFT_BRIDGE_WEB_CREDENTIAL': hashlib.sha256(f'{username}:{password}'.encode()).hexdigest(),
+        'SHIFT_BRIDGE_ADMIN_USER': username,
+        'SHIFT_BRIDGE_ADMIN_PASSWORD': password,
     }
 
 
@@ -55,6 +54,9 @@ def main():
         if not key:
             raise RuntimeError('The mounted Gemini credential is empty.')
         data, web_settings = Path('/data'), {'PORT': '8000'}
+    for name in ('SHIFT_BRIDGE_ADMIN_USER', 'SHIFT_BRIDGE_ADMIN_PASSWORD'):
+        if name in environment:
+            web_settings[name] = environment.pop(name)
     token = secrets.token_urlsafe(32)
     engine_port = '8011'
     engine_url = f'http://127.0.0.1:{engine_port}'

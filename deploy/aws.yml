@@ -325,8 +325,10 @@ Resources:
                   import sqlite3
                   from contextlib import closing
 
-                  for name in ('web/shift_bridge.db', 'engine/bridge.db'):
-                      source = Path('/var/lib/shift-bridge/data', name)
+                  data = Path('/var/lib/shift-bridge/data')
+                  databases = [data / 'web/shift_bridge.db', data / 'engine/bridge.db']
+                  databases.extend((data / 'web').glob('shift_bridge-member-*.db'))
+                  for source in databases:
                       if source.is_file():
                           backup = Path('/var/lib/shift-bridge/backup', source.name)
                           temp = backup.with_suffix('.tmp')
