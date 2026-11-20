@@ -187,6 +187,57 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('AI 생성 테스트', page)
 
+    def test_place_preferences_are_private_to_the_signed_in_account(self):
+        path = '/api/account/preferences'
+        guest = {'Cookie': ''}
+        self.assertEqual(self.request('GET', path, headers=guest)[0], 401)
+        self.assertEqual(self.request('POST', path, {}, guest)[0], 401)
+        self.assertEqual(self.request('GET', '/account/preferences', headers=guest)[0], 303)
+        self.assertIn('id="preferences"', self.request('GET', '/admin')[1])
+
+        status, account_a = self.request('GET', path)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.response_headers['Cache-Control'], 'no-store')
+        self.assertEqual((account_a['default_location'], account_a['place_type']), ('', ''))
+        values_a = {'account_id': account_a['account_id'], 'default_location': ' A 기본 위치 ',
+                    'place_type': '데이터센터'}
+        self.assertEqual(self.request('POST', path, values_a)[0], 200)
+        old_admin = {'Cookie': self.cookie}
+
+        member = {'username': 'preferences-member', 'password': 'fixture-member-password'}
+        self.assertEqual(self.request('POST', '/api/account/signup', member, guest)[0], 201)
+        self.assertEqual(self.request('POST', '/api/account/login', member, old_admin)[0], 200)
+        member_cookie = self.response_headers['Set-Cookie'].split(';')[0]
+        switched = {'Cookie': member_cookie}
+        self.assertEqual(self.request('GET', path, headers=old_admin)[0], 401)
+        self.assertEqual(self.request('GET', '/admin', headers=switched)[0], 403)
+        self.assertIn('id="preferences"', self.request('GET', '/account/preferences', headers=switched)[1])
+
+        status, account_b = self.request('GET', path + '?user_id=' + account_a['account_id'], headers=switched)
+        self.assertEqual(status, 200)
+        self.assertNotEqual(account_a['account_id'], account_b['account_id'])
+        self.assertEqual((account_b['default_location'], account_b['place_type']), ('', ''))
+        self.assertEqual(self.request('POST', path, values_a, switched)[0], 409)
+        values_b = {'account_id': account_b['account_id'], 'default_location': 'B 기본 위치', 'place_type': '사무실'}
+        self.assertEqual(self.request('POST', path, {**values_b, 'place_type': 42}, switched)[0], 400)
+        self.assertEqual(self.request('POST', path, values_b, {**switched, 'Origin': 'https://other.example'})[0], 403)
+        self.assertEqual(self.request('POST', path, {**values_b, 'user_id': account_a['account_id']}, switched)[0], 200)
+        stored_b = self.request('GET', path, headers=switched)[1]
+        self.assertEqual({key: stored_b[key] for key in values_b}, values_b)
+        self.assertEqual(self.request('POST', '/api/account/logout', {}, switched)[0], 200)
+        self.assertEqual(self.request('GET', path, headers=switched)[0], 401)
+        self.assertEqual(self.request('POST', path, values_b, switched)[0], 401)
+        self.assertIsNone(accounts.save_preferences(int(account_b['account_id']), member_cookie.split('=', 1)[1], values_b))
+
+        self.assertEqual(self.request('POST', '/api/account/login',
+                                      {'username': 'admin', 'password': 'test-admin-password'}, guest)[0], 200)
+        self.cookie = self.response_headers['Set-Cookie'].split(';')[0]
+        stored_a = self.request('GET', path)[1]
+        self.assertEqual((stored_a['default_location'], stored_a['place_type']), ('A 기본 위치', '데이터센터'))
+        self.assertEqual(self.request('POST', path, {**values_a, 'default_location': ''})[0], 200)
+        cleared_a = self.request('GET', path)[1]
+        self.assertEqual((cleared_a['default_location'], cleared_a['place_type']), ('', '데이터센터'))
+
     def test_admin_gemini_connection_test_is_logged(self):
         payload = b'{"candidates":[{"content":{"parts":[{"text":"OK"}]}}]}'
         health = {'auth_configured': True, 'api_key_configured': True}

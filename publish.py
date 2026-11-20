@@ -27,6 +27,7 @@ PATHS = (
     'Agent/static/app.js', 'Agent/static/about.html', 'Agent/static/about.css', 'Agent/static/about.js',
     'Agent/accounts.py', 'Agent/static/account.html', 'Agent/static/account.css',
     'Agent/static/account.js', 'Agent/static/admin.html', 'Agent/static/admin.js',
+    'Agent/static/preferences.html', 'Agent/static/preferences.js',
     'Agent/tests/test_web.py',
     'BridgeCLI/.env.example', 'BridgeCLI/README.md', 'BridgeCLI/api_server.py',
     'BridgeCLI/bridge_cli.py', 'BridgeCLI/config.py', 'BridgeCLI/gemini_api.py',

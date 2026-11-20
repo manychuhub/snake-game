@@ -16,6 +16,7 @@ import database as db
 DAILY_LIMIT = 3
 KST = timezone(timedelta(hours=9))
 SESSION_SECONDS = 12 * 60 * 60
+PREFERENCE_LIMITS = {'default_location': 120, 'place_type': 80}
 
 
 class QuotaExceeded(Exception):
@@ -32,6 +33,10 @@ def init():
         CREATE UNIQUE INDEX IF NOT EXISTS web_single_admin ON web_users(admin) WHERE admin = 1;
         CREATE TABLE IF NOT EXISTS web_sessions (
             token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS web_preferences (
+            user_id INTEGER PRIMARY KEY REFERENCES web_users(id),
+            default_location TEXT NOT NULL DEFAULT '', place_type TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS web_events (
             id INTEGER PRIMARY KEY, username TEXT NOT NULL, category TEXT NOT NULL,
@@ -153,6 +158,39 @@ def session(token):
 def logout(token):
     with db.get_connection(db.DB_PATH) as conn:
         conn.execute('DELETE FROM web_sessions WHERE token=?', (token_hash(token),))
+
+
+def get_preferences(user_id):
+    with db.get_connection(db.DB_PATH) as conn:
+        row = conn.execute(
+            'SELECT default_location,place_type FROM web_preferences WHERE user_id=?',
+            (user_id,)).fetchone()
+    return dict(row) if row else dict.fromkeys(PREFERENCE_LIMITS, '')
+
+
+def save_preferences(user_id, token, body):
+    preferences = {}
+    for field, limit in PREFERENCE_LIMITS.items():
+        value = body.get(field)
+        if not isinstance(value, str):
+            raise ValueError('기본 위치와 장소 종류를 문자열로 입력하세요.')
+        if value and not value.isprintable():
+            raise ValueError('기본 위치와 장소 종류는 한 줄로 입력하세요.')
+        value = value.strip()
+        if len(value) > limit:
+            raise ValueError('기본 위치는 120자, 장소 종류는 80자까지 입력할 수 있습니다.')
+        preferences[field] = value
+
+    with db.get_connection(db.DB_PATH) as conn:
+        # Check revocation in the write itself so logout and save are ordered by SQLite.
+        cursor = conn.execute('''
+            INSERT INTO web_preferences(user_id,default_location,place_type)
+            SELECT user_id,?,? FROM web_sessions WHERE token=? AND user_id=? AND expires>?
+            ON CONFLICT(user_id) DO UPDATE SET
+                default_location=excluded.default_location, place_type=excluded.place_type
+        ''', (preferences['default_location'], preferences['place_type'], token_hash(token), user_id,
+              int(time.time())))
+        return preferences if cursor.rowcount else None
 
 
 def today():

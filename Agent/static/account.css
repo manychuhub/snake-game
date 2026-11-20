@@ -45,6 +45,22 @@ button.secondary, button[aria-pressed="false"] { background: #202f48; color: inh
 .engine-panel h2 { font-size: 1rem; margin: 0; }
 .engine-panel p { color: #adc2dd; margin: .2rem 0 0; }
 .admin-panel { margin-top: 1rem; }
+.preferences-panel { margin-bottom: 1rem; }
+.preferences-header h2 { margin: 0; }
+.preferences-header button { margin-left: auto; }
+.preferences-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+    align-items: end;
+    gap: .75rem;
+    padding: 0;
+    margin: 1rem 0 0;
+    border: 0;
+    min-width: 0;
+}
+.preferences-fields label { display: grid; gap: .25rem; }
+.preferences-fields button { justify-self: start; }
+.preferences-panel [role="status"] { margin: .75rem 0 0; }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; text-align: left; }
 th, td { border-bottom: 1px solid #31415a; padding: .65rem; overflow-wrap: anywhere; }

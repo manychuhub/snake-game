@@ -43,6 +43,7 @@ async function refreshAccount() {
     document.getElementById("aiQuota").textContent = account.remaining === null
         ? "AI 생성 한도 면제" : `오늘 AI 생성 ${account.remaining}/3회 남음`;
     document.getElementById("adminLink").hidden = !account.admin;
+    document.getElementById("preferencesLink").hidden = account.admin;
     document.getElementById("engineButton").hidden = !account.admin;
 }
 
@@ -65,13 +66,17 @@ document.addEventListener("DOMContentLoaded", () => {
         for (const control of document.querySelectorAll("main button:not(.btn-filter)")) control.disabled = true;
         for (const zone of document.querySelectorAll(".upload-zone, #micBtn")) zone.inert = true;
     } else {
+        const authChanges = new BroadcastChannel("shift-bridge-auth");
         refreshAccount().catch(console.error);
         document.getElementById("logoutButton").hidden = false;
         document.getElementById("logoutButton").addEventListener("click", async () => {
             const response = await fetch("/api/account/logout", {
                 method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"
             });
-            if (response.ok || response.status === 401) location.replace("/login");
+            if (response.ok || response.status === 401) {
+                authChanges.postMessage("changed");
+                location.replace("/login");
+            }
         });
     }
     loadWorkLogs();

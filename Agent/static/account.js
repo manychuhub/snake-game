@@ -3,6 +3,7 @@ const title = document.getElementById("title");
 const submit = document.getElementById("submit");
 const toggle = document.getElementById("toggle");
 const message = document.getElementById("message");
+const authChanges = new BroadcastChannel("shift-bridge-auth");
 let signup = false;
 
 function setMode(enabled) {
@@ -31,6 +32,7 @@ form.addEventListener("submit", async (event) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
         if (!signup) {
+            authChanges.postMessage("changed");
             location.replace("/workspace");
             return;
         }

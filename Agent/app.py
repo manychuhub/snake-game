@@ -29,9 +29,11 @@ import gemini_client as gemini
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_ALIASES = {'/': '/index.html', '/workspace': '/index.html', '/workspace/': '/index.html',
+                  '/account/preferences': '/preferences.html',
                   '/login': '/account.html', '/admin': '/admin.html', '/demo': '/index.html', '/demo/': '/index.html', '/about': '/about.html', '/about/': '/about.html'}
 INTRO_FILES = {'/about.html', '/about.css', '/about.js'}
-STATIC_PATHS = {'/index.html', '/style.css', '/app.js'} | INTRO_FILES | {'/account.html', '/admin.html', '/account.css', '/account.js', '/admin.js'}
+STATIC_PATHS = {'/index.html', '/style.css', '/app.js'} | INTRO_FILES | {
+    '/account.html', '/admin.html', '/account.css', '/account.js', '/admin.js', '/preferences.html', '/preferences.js'}
 RENDER_PUBLIC_PATHS = {'/demo', '/demo/', '/style.css', '/app.js'} | INTRO_FILES
 
 PORT = int(os.environ.get("PORT", 8000))
@@ -42,6 +44,7 @@ WEB_USER = os.getenv('SHIFT_BRIDGE_WEB_USER')
 WEB_CREDENTIAL = os.getenv('SHIFT_BRIDGE_WEB_CREDENTIAL')
 ON_RENDER = os.getenv('RENDER') == 'true'
 PUBLIC_ACCOUNT_FILES = {'/login', '/account.css', '/account.js'}
+PREFERENCES_API = '/api/account/preferences'
 MAX_REQUEST_BYTES = 14_000_000
 
 if EXPECTED_SIGNER:
@@ -215,6 +218,11 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             if path == '/api/account/me':
                 return self.send_json({'username': self.subject, 'admin': bool(self.member['admin']),
                                        'remaining': accounts.remaining(self.member)})
+            if path == PREFERENCES_API:
+                user_id = self.member['id']
+                return self.send_json({'account_id': str(user_id), 'username': self.subject,
+                                       'admin': bool(self.member['admin']),
+                                       **accounts.get_preferences(user_id)})
             if path.startswith('/api/admin/'):
                 query = urllib.parse.parse_qs(url.query)
                 raw_before = query.get('before', [''])[0]
@@ -320,6 +328,18 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
         if path == '/api/account/logout':
             accounts.logout(self.session_token())
             return self.send_json({'success': True}, headers=(self.session_cookie('', 0),))
+        if path == PREFERENCES_API:
+            user_id = self.member['id']
+            # The browser's account ID is a stale-form check. Ownership comes from the session.
+            if body.get('account_id') != str(user_id):
+                return self.send_json({'error': '현재 로그인 계정의 설정을 다시 불러오세요.'}, 409)
+            try:
+                preferences = accounts.save_preferences(user_id, self.session_token(), body)
+            except ValueError as error:
+                return self.send_json({'error': str(error)}, 400)
+            if preferences is None:
+                return self.send_json({'error': '로그인이 필요합니다.'}, 401)
+            return self.send_json({'account_id': str(user_id), 'username': self.subject, **preferences})
         if path == '/api/admin/whitelist':
             user_id, enabled = body.get('user_id'), body.get('enabled')
             if type(user_id) is not int or not 0 < user_id < 2**63 or type(enabled) is not bool:
