@@ -51,7 +51,12 @@ def main():
     key = environment.pop('GEMINI_API_KEY', '').strip()
     environment.pop('SHIFT_BRIDGE_WEB_CREDENTIAL', None)
     on_render = environment.get('RENDER') == 'true'
+    web_database = environment.pop('SHIFT_BRIDGE_DATABASE_URL', '')
+    engine_database = environment.pop('SHIFT_BRIDGE_ENGINE_DATABASE_URL', '')
     if on_render:
+        allow_sqlite = environment.pop('SHIFT_BRIDGE_STORAGE_MODE', '') == 'sqlite'
+        if not (web_database and engine_database) and (web_database or engine_database or not allow_sqlite):
+            raise RuntimeError('Render requires PostgreSQL connections for the web app and BridgeCLI.')
         data, web_settings = render_settings(environment)
     else:
         key = Path('/run/shift-bridge/gemini.key').read_text(encoding='utf-8').strip()
@@ -61,14 +66,21 @@ def main():
     for name in ('SHIFT_BRIDGE_ADMIN_USER', 'SHIFT_BRIDGE_ADMIN_PASSWORD'):
         if name in environment:
             web_settings[name] = environment.pop(name)
+    if web_database:
+        for name in ('SHIFT_BRIDGE_ADMIN_PASSWORD', 'SHIFT_BRIDGE_ADMIN_SYNC_PASSWORD'):
+            web_settings.pop(name, None)
     token = secrets.token_urlsafe(32)
     engine_port = '8011'
     engine_url = f'http://127.0.0.1:{engine_port}'
-    shared = {**environment, 'HYBRID_API_AUTH_TOKEN': token}
+    shared = {**environment, 'HYBRID_API_AUTH_TOKEN': token, 'PYTHONPATH': '/app'}
     engine_env = {**shared, 'GEMINI_API_KEY': key, 'BRIDGE_PORT': engine_port, 'BRIDGE_DATA_DIR': str(data / 'engine')}
     web_env = {**shared, **web_settings, 'SHIFT_BRIDGE_WEB_HOST': '0.0.0.0',
                'SHIFT_BRIDGE_DB_PATH': str(data / 'web/shift_bridge.db'), 'SHIFT_BRIDGE_SEED_DEMO': '0',
                'SHIFT_BRIDGE_ENGINE_URL': engine_url}
+    if web_database:
+        web_env['SHIFT_BRIDGE_DATABASE_URL'] = web_database
+    if engine_database:
+        engine_env['SHIFT_BRIDGE_ENGINE_DATABASE_URL'] = engine_database
     processes = []
     try:
         processes.append(subprocess.Popen(

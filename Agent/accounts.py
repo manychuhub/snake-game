@@ -1,4 +1,4 @@
-"""Web accounts, sessions, and usage. All account data stays in the main SQLite database."""
+"""Web accounts, sessions, and usage."""
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -8,7 +8,6 @@ import hmac
 import os
 import re
 import secrets
-import sqlite3
 import time
 
 import database as db
@@ -32,6 +31,10 @@ class LastAdministrator(Exception):
 
 
 def init():
+    if db.postgres_enabled():
+        import postgres_store
+        postgres_store.verify(os.environ['SHIFT_BRIDGE_DATABASE_URL'])
+        return
     with db.get_connection(db.DB_PATH) as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS web_users (
@@ -54,7 +57,7 @@ def init():
         CREATE INDEX IF NOT EXISTS web_events_category ON web_events(category, id);
         CREATE INDEX IF NOT EXISTS web_events_quota ON web_events(username, category, day, result);
         """)
-        conn.execute('BEGIN IMMEDIATE')
+        db.lock_accounts(conn)
         columns = {row['name'] for row in conn.execute('PRAGMA table_info(web_users)')}
         if 'retired' not in columns:
             conn.execute('ALTER TABLE web_users ADD COLUMN retired INTEGER NOT NULL DEFAULT 0')
@@ -102,13 +105,17 @@ def create_user(username, password, *, admin=False):
         raise ValueError('사용할 수 없는 아이디입니다.')
     encoded_password = encode_password(password)
     with db.get_connection(db.DB_PATH) as conn:
-        try:
-            cursor = conn.execute('INSERT INTO web_users(username,password,admin) VALUES(?,?,?)',
-                         (username, encoded_password, int(admin)))
-        except sqlite3.IntegrityError:
-            raise ValueError('사용할 수 없는 아이디입니다.') from None
-        if not admin:
-            workspace = db.workspace_db.set(workspace_path(cursor.lastrowid))
+        values = (username, encoded_password, int(admin))
+        if db.postgres_enabled():
+            row = conn.execute('INSERT INTO web_users(username,password,admin,personal_workspace) VALUES(?,?,?,?) '
+                               'ON CONFLICT(username) DO NOTHING RETURNING id', (*values, int(not admin))).fetchone()
+        else:
+            row = conn.execute('INSERT INTO web_users(username,password,admin) VALUES(?,?,?) '
+                               'ON CONFLICT(username) DO NOTHING RETURNING id', values).fetchone()
+        if row is None:
+            raise ValueError('사용할 수 없는 아이디입니다.')
+        if not admin and not db.postgres_enabled():
+            workspace = db.workspace_db.set(workspace_path(row[0]))
             try:
                 db.init_db(seed=False)
             finally:
@@ -118,7 +125,7 @@ def create_user(username, password, *, admin=False):
 def bootstrap_admin(username, password, *, update_password=False):
     username = validated_username(username)
     with db.get_connection(db.DB_PATH) as conn:
-        conn.execute('BEGIN IMMEDIATE')
+        db.lock_accounts(conn)
         user = conn.execute('SELECT * FROM web_users WHERE username=?', (username,)).fetchone()
         if user is None:
             encoded = encode_password(password)
@@ -150,7 +157,7 @@ def set_password(conn, user_id, encoded_password):
 def reset_admin_password(username, password):
     encoded_password = encode_password(password)
     with db.get_connection(db.DB_PATH) as conn:
-        conn.execute('BEGIN IMMEDIATE')
+        db.lock_accounts(conn)
         user = conn.execute('SELECT id FROM web_users WHERE username=? AND admin=1 AND retired=0',
                             (normalize(username),)).fetchone()
         if user is None:
@@ -160,7 +167,7 @@ def reset_admin_password(username, password):
 
 def grant_admin(username, password):
     with db.get_connection(db.DB_PATH) as conn:
-        conn.execute('BEGIN IMMEDIATE')
+        db.lock_accounts(conn)
         user = conn.execute('SELECT id,password,admin FROM web_users WHERE username=? AND retired=0',
                             (normalize(username),)).fetchone()
         if user is None or not password_matches(password, user['password']):
@@ -182,7 +189,7 @@ def login(username, password):
         user = conn.execute('SELECT id,password FROM web_users WHERE username=? AND retired=0', (username,)).fetchone()
         accepted = password_matches(password, user['password'] if user else None)
         if accepted:
-            conn.execute('BEGIN IMMEDIATE')
+            db.lock_accounts(conn)
             current = conn.execute('SELECT password FROM web_users WHERE id=? AND retired=0', (user['id'],)).fetchone()
             accepted = bool(current and hmac.compare_digest(current['password'], user['password']))
         add_event(conn, username, 'login', '로그인', 'success' if accepted else 'failed')
@@ -204,6 +211,8 @@ def session(token):
 
 def session_user(conn, token, *, credentials=False):
     columns = 'u.id,u.username,u.admin,u.whitelisted' + (',u.password' if credentials else '')
+    if db.postgres_enabled():
+        columns += ',u.personal_workspace'
     return conn.execute(
         f'SELECT {columns} FROM web_sessions s JOIN web_users u ON u.id=s.user_id '
         'WHERE s.token=? AND s.expires>? AND u.retired=0',
@@ -212,11 +221,12 @@ def session_user(conn, token, *, credentials=False):
 
 def logout(token):
     with db.get_connection(db.DB_PATH) as conn:
+        db.lock_accounts(conn)
         conn.execute('DELETE FROM web_sessions WHERE token=?', (token_hash(token),))
 
 
 def change_account(user_id, token, current_password, *, new_password=None, delete=False):
-    with db.get_connection(db.DB_PATH) as conn:
+    with db.get_connection(db.DB_PATH, account_id=user_id) as conn:
         user = session_user(conn, token, credentials=True)
         if user is None or user['id'] != user_id:
             raise SessionExpired
@@ -227,7 +237,7 @@ def change_account(user_id, token, current_password, *, new_password=None, delet
                 raise ValueError('현재 비밀번호와 다른 새 비밀번호를 입력하세요.')
             encoded = encode_password(new_password)
 
-        conn.execute('BEGIN IMMEDIATE')
+        db.lock_accounts(conn)
         current = session_user(conn, token, credentials=True)
         if (current is None or current['id'] != user_id
                 or not hmac.compare_digest(current['password'], user['password'])):
@@ -246,7 +256,7 @@ def change_account(user_id, token, current_password, *, new_password=None, delet
 
 
 def get_preferences(user_id):
-    with db.get_connection(db.DB_PATH) as conn:
+    with db.get_connection(db.DB_PATH, account_id=user_id) as conn:
         row = conn.execute(
             'SELECT default_location,place_type FROM web_preferences WHERE user_id=?',
             (user_id,)).fetchone()
@@ -266,7 +276,8 @@ def save_preferences(user_id, token, body):
             raise ValueError('기본 위치는 120자, 장소 종류는 80자까지 입력할 수 있습니다.')
         preferences[field] = value
 
-    with db.get_connection(db.DB_PATH) as conn:
+    with db.get_connection(db.DB_PATH, account_id=user_id) as conn:
+        db.lock_accounts(conn)
         # Check revocation in the write itself so logout and save are ordered by SQLite.
         cursor = conn.execute('''
             INSERT INTO web_preferences(user_id,default_location,place_type)
@@ -283,8 +294,8 @@ def today():
 
 
 def add_event(conn, username, category, feature, result, day=None):
-    return conn.execute('INSERT INTO web_events(username,category,feature,result,day) VALUES(?,?,?,?,?)',
-                        (username, category, feature, result, day or today())).lastrowid
+    return conn.execute('INSERT INTO web_events(username,category,feature,result,day) VALUES(?,?,?,?,?) RETURNING id',
+                        (username, category, feature, result, day or today())).fetchone()[0]
 
 
 def feature_event(username, feature, status):
@@ -309,7 +320,7 @@ def remaining(user):
 def track_generation(user, feature):
     username = user['username']
     with db.get_connection(db.DB_PATH) as conn:
-        conn.execute('BEGIN IMMEDIATE')
+        db.lock_accounts(conn)
         current = conn.execute('SELECT admin,whitelisted FROM web_users WHERE id=? AND retired=0', (user['id'],)).fetchone()
         if current is None:
             raise SessionExpired
@@ -328,10 +339,11 @@ def track_generation(user, feature):
 
 
 def dashboard(category, before, query=''):
+    substring = 'strpos' if db.postgres_enabled() else 'instr'
     with db.get_connection(db.DB_PATH) as conn:
         events = conn.execute(
             'SELECT id,username,feature,result,created_at FROM web_events '
-            'WHERE category=? AND id<? AND instr(username,?)>0 ORDER BY id DESC LIMIT 101',
+            f'WHERE category=? AND id<? AND {substring}(username,?)>0 ORDER BY id DESC LIMIT 101',
             (category, before, query)).fetchall()
         return {
             'events': [dict(row) for row in events[:100]],
@@ -340,10 +352,11 @@ def dashboard(category, before, query=''):
 
 
 def members(query, before):
+    substring = 'strpos' if db.postgres_enabled() else 'instr'
     with db.get_connection(db.DB_PATH) as conn:
         rows = conn.execute(
             'SELECT id,username,whitelisted FROM web_users WHERE admin=0 AND retired=0 AND id<? '
-            'AND instr(username,?)>0 ORDER BY id DESC LIMIT 101', (before, query)).fetchall()
+            f'AND {substring}(username,?)>0 ORDER BY id DESC LIMIT 101', (before, query)).fetchall()
         return {'users': [dict(row) for row in rows[:100]], 'next': rows[99]['id'] if len(rows) > 100 else None}
 
 

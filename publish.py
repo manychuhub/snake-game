@@ -21,7 +21,7 @@ TASK_NAME = 'SHIFT BRIDGE GitHub Publish'
 LOG = logging.getLogger('shift-bridge-publish')
 PATHS = (
     '.dockerignore', '.gitignore', '.github/workflows/aws-release.yml', 'Dockerfile',
-    'AGENTS.md', 'README.md', 'Start.bat', 'Publish.bat', 'launch.py', 'publish.py',
+    'AGENTS.md', 'README.md', 'Start.bat', 'Publish.bat', 'launch.py', 'publish.py', 'postgres_store.py',
     'Agent/README.md', 'Agent/app.py', 'Agent/alb_identity.py', 'Agent/database.py',
     'Agent/gemini_client.py', 'Agent/demo.py', 'Agent/static/index.html', 'Agent/static/style.css',
     'Agent/static/app.js', 'Agent/static/about.html', 'Agent/static/about.css', 'Agent/static/about.js',
@@ -35,6 +35,8 @@ PATHS = (
     'BridgeCLI/bridge.bat', 'BridgeCLI/start.bat', 'BridgeCLI/stop.bat',
     'BridgeCLI/test.bat', 'BridgeCLI/tests/test_bridge.py',
     'deploy/README.md', 'deploy/RENDER.md', 'deploy/aws.yml', 'deploy/run.py',
+    'deploy/sqlite_backup.py', 'deploy/import_sqlite.py', 'deploy/test_postgres_migration.py',
+    'supabase/migrations/20261120000100_shift_bridge_storage.sql',
     'test/README.md', 'test/app.py', 'test/alb_identity.py', 'test/database.py',
     'test/gemini_client.py', 'test/static/index.html', 'test/static/style.css', 'test/static/app.js',
 )

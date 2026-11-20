@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt 'cryptography>=48,<51'
 
 COPY Agent/ /app/Agent/
 COPY BridgeCLI/ /app/BridgeCLI/
+COPY postgres_store.py /app/postgres_store.py
 COPY deploy/run.py /app/run.py
 
 EXPOSE 8000

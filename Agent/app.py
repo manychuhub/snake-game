@@ -141,8 +141,12 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
     @contextmanager
     def member_workspace(self, path):
         personal = accounts.workspace_path(self.member['id'])
-        # Members promoted to administrator keep their existing workspace.
-        workspace = db.workspace_db.set(personal if not self.member['admin'] or personal.is_file() else None)
+        if db.postgres_enabled():
+            use_personal = self.member['personal_workspace']
+        else:
+            use_personal = not self.member['admin'] or personal.is_file()
+        workspace = db.workspace_db.set(personal if use_personal else None)
+        workspace_id = db.workspace_id.set(self.member['id'] if use_personal else 0)
         tracker = gemini.generation_tracker.set(partial(accounts.track_generation, self.member, path))
         try:
             self.feature_path = path
@@ -151,6 +155,7 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             self.feature_path = None
             gemini.generation_tracker.reset(tracker)
             db.workspace_db.reset(workspace)
+            db.workspace_id.reset(workspace_id)
 
     def send_json(self, data, status_code=200, *, headers=()):
         if getattr(self, 'feature_path', None):
@@ -184,13 +189,23 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
     # GET 요청 라우팅
     # ==========================================================================
     def do_GET(self):
-        self.read_request()
+        try:
+            self.read_request()
+        except db.DatabaseUnavailable:
+            self.send_json({'error': '데이터베이스에 연결할 수 없습니다.'}, 503)
 
     def do_HEAD(self):
-        self.read_request(head=True)
+        try:
+            self.read_request(head=True)
+        except db.DatabaseUnavailable:
+            self.send_json({'error': '데이터베이스에 연결할 수 없습니다.'}, 503)
 
     def read_request(self, *, head=False):
         if self.path == '/healthz':
+            if db.postgres_enabled():
+                with db.get_connection(db.DB_PATH) as conn:
+                    if conn.execute('SELECT 1 FROM sqlite_import WHERE id=1').fetchone() is None:
+                        raise db.DatabaseUnavailable
             return self.send_json({'status': 'ok'})
         url = urllib.parse.urlsplit(self.path)
         path = url.path
@@ -295,6 +310,12 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
     # POST 요청 라우팅
     # ==========================================================================
     def do_POST(self):
+        try:
+            self.write_request()
+        except db.DatabaseUnavailable:
+            self.send_json({'error': '데이터베이스에 연결할 수 없습니다.'}, 503)
+
+    def write_request(self):
         if not self.authorize():
             return
         path = urllib.parse.urlsplit(self.path).path
@@ -595,7 +616,7 @@ def run():
     accounts.init()
     bootstrap_password = os.environ.pop('SHIFT_BRIDGE_ADMIN_PASSWORD', '')
     sync_password = os.environ.pop('SHIFT_BRIDGE_ADMIN_SYNC_PASSWORD', '') == '1'
-    if bootstrap_password:
+    if bootstrap_password and not db.postgres_enabled():
         accounts.bootstrap_admin(os.getenv('SHIFT_BRIDGE_ADMIN_USER', 'admin'), bootstrap_password,
                                  update_password=ON_RENDER and sync_password)
     ThreadingTCPServer.allow_reuse_address = True
