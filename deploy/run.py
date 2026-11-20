@@ -13,12 +13,15 @@ import urllib.request
 
 
 def render_settings(environment):
-    username = environment.pop('SHIFT_BRIDGE_WEB_USER', 'admin')
-    password = environment.pop('SHIFT_BRIDGE_WEB_PASSWORD', '')
-    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', username):
-        raise RuntimeError('SHIFT_BRIDGE_WEB_USER must use letters, numbers, dots, underscores or dashes.')
+    legacy_user = environment.pop('SHIFT_BRIDGE_WEB_USER', 'admin')
+    legacy_password = environment.pop('SHIFT_BRIDGE_WEB_PASSWORD', '')
+    username = environment.pop('SHIFT_BRIDGE_ADMIN_USER', legacy_user)
+    configured_password = environment.pop('SHIFT_BRIDGE_ADMIN_PASSWORD', '')
+    password = configured_password or legacy_password
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{3,64}', username):
+        raise RuntimeError('SHIFT_BRIDGE_ADMIN_USER must be 3–64 letters, numbers, dots, underscores or dashes.')
     if password and not 24 <= len(password) <= 256:
-        raise RuntimeError('Set SHIFT_BRIDGE_WEB_PASSWORD to a long random password (24–256 characters).')
+        raise RuntimeError('Set SHIFT_BRIDGE_ADMIN_PASSWORD to a long random password (24–256 characters).')
     origin = environment.get('RENDER_EXTERNAL_URL', '').rstrip('/')
     if not re.fullmatch(r'https://[a-z0-9-]+\.onrender\.com', origin):
         raise RuntimeError('Render must provide a valid RENDER_EXTERNAL_URL for the web service.')
@@ -35,6 +38,7 @@ def render_settings(environment):
         'PORT': str(port), 'SHIFT_BRIDGE_PUBLIC_ORIGIN': origin,
         'SHIFT_BRIDGE_ADMIN_USER': username,
         'SHIFT_BRIDGE_ADMIN_PASSWORD': password,
+        'SHIFT_BRIDGE_ADMIN_SYNC_PASSWORD': '1' if configured_password else '0',
     }
 
 

@@ -83,21 +83,33 @@ def create_user(username, password, *, admin=False):
                 db.workspace_db.reset(workspace)
 
 
-def bootstrap_admin(username, password):
+def bootstrap_admin(username, password, *, update_password=False):
     with db.get_connection(db.DB_PATH) as conn:
-        if conn.execute('SELECT 1 FROM web_users WHERE admin=1').fetchone():
+        conn.execute('BEGIN IMMEDIATE')
+        admin = conn.execute('SELECT id,password FROM web_users WHERE admin=1').fetchone()
+        if admin:
+            if update_password:
+                salt, expected = admin['password'].split(':')
+                if not hmac.compare_digest(password_digest(password, salt), expected):
+                    set_admin_password(conn, admin['id'], encode_password(password))
             return
     create_user(username, password, admin=True)
+
+
+def set_admin_password(conn, user_id, encoded_password):
+    conn.execute('UPDATE web_users SET password=? WHERE id=?', (encoded_password, user_id))
+    conn.execute('DELETE FROM web_sessions WHERE user_id=?', (user_id,))
 
 
 def reset_admin_password(username, password):
     encoded_password = encode_password(password)
     with db.get_connection(db.DB_PATH) as conn:
-        user = conn.execute('UPDATE web_users SET password=? WHERE username=? AND admin=1 RETURNING id',
-                            (encoded_password, normalize(username))).fetchone()
+        conn.execute('BEGIN IMMEDIATE')
+        user = conn.execute('SELECT id FROM web_users WHERE username=? AND admin=1',
+                            (normalize(username),)).fetchone()
         if user is None:
             raise ValueError('관리자 계정을 찾을 수 없습니다.')
-        conn.execute('DELETE FROM web_sessions WHERE user_id=?', (user['id'],))
+        set_admin_password(conn, user['id'], encoded_password)
 
 
 def token_hash(token):

@@ -557,8 +557,10 @@ def run():
     db.init_db()
     accounts.init()
     bootstrap_password = os.environ.pop('SHIFT_BRIDGE_ADMIN_PASSWORD', '')
+    sync_password = os.environ.pop('SHIFT_BRIDGE_ADMIN_SYNC_PASSWORD', '') == '1'
     if bootstrap_password:
-        accounts.bootstrap_admin(os.getenv('SHIFT_BRIDGE_ADMIN_USER', 'admin'), bootstrap_password)
+        accounts.bootstrap_admin(os.getenv('SHIFT_BRIDGE_ADMIN_USER', 'admin'), bootstrap_password,
+                                 update_password=ON_RENDER and sync_password)
     ThreadingTCPServer.allow_reuse_address = True
     server_address = (HOST, PORT)
     try:
