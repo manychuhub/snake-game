@@ -121,7 +121,7 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-
 
 .flow-toolbar { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .choice-set, .flow-controls { display: flex; align-items: center; gap: 6px; }
-.choice-set { padding: 4px; border-radius: 8px; background: #0c1321; }
+.choice-set { flex-wrap: wrap; padding: 4px; border-radius: 8px; background: #0c1321; }
 .choice-set button, .flow-controls button { cursor: pointer; padding: 7px 11px; border: 1px solid transparent; border-radius: 6px; background: transparent; font-size: .83rem; color: var(--muted); white-space: nowrap; }
 .choice-set button[aria-pressed="true"] { border-color: #5363bf; background: #313475; color: #fff; font-weight: 650; }
 .flow-controls button { min-height: 36px; border-color: var(--line); background: var(--raised); color: var(--text); }
@@ -130,7 +130,7 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-
 .flow-controls button span { margin-left: 6px; }
 .flow-nodes {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 10px;
     list-style: none;
     padding: 24px 18px;
@@ -151,6 +151,8 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-
 .step h3 { margin: 5px 0; font-size: 1.12rem; }
 #step-text { color: var(--muted); }
 
+.log-date { margin: 0 0 9px; color: var(--muted); font-size: .93rem; }
+.timeline + .log-date { margin-top: 28px; }
 .timeline { list-style: none; padding: 0; }
 .timeline li { display: grid; grid-template-columns: 64px 1fr; gap: 16px; padding: 17px 0; border-top: 1px solid var(--line); }
 .timeline li > time, .timeline-time { color: var(--violet); font: .88rem/1.7 Consolas, monospace; }
@@ -177,7 +179,7 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-
     .architecture { grid-template-columns: 1fr; gap: 22px; padding: 16px; }
     .architecture li:not(:last-child)::after { content: "↓"; top: calc(100% - 2px); left: 50%; transform: translateX(-50%); }
     .structure-notes, .bridge-explainer { padding: 14px 16px; }
-    .flow-nodes { gap: 5px; padding: 13px 8px; }
+    .flow-nodes { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 13px 8px; }
     .flow-nodes li { font-size: .72rem; }
     .flow-toolbar, .flow-detail { padding-inline: 12px; }
     .timeline li { grid-template-columns: 47px 1fr; gap: 10px; }
