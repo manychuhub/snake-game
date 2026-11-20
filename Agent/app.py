@@ -348,11 +348,7 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             if not raw_text:
                 return self.send_json({"error": "업무 원문 텍스트가 비어 있습니다."}, 400)
             
-            classified = gemini.classify_raw_work_log(raw_text)
-            # 누락 정보 사전 탐지
-            missing_issues = gemini.detect_missing_information(classified)
-            classified['missing_alerts'] = missing_issues
-            return self.send_json(classified)
+            return self.send_json(gemini.classify_raw_work_log(raw_text))
 
         # 업무 기록 정식 저장
         elif path == '/api/logs/create':
