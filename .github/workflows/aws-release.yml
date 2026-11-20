@@ -28,9 +28,10 @@ jobs:
         run: |
           set -euo pipefail
           password=synthetic-smoke-test-password
+          origin=https://shift-bridge-example.onrender.com
           docker run -d --name shift-bridge-render-test -p 127.0.0.1:18000:10000 \
-            -e RENDER=true -e RENDER_EXTERNAL_URL=https://shift-bridge-example.onrender.com \
-            -e SHIFT_BRIDGE_WEB_PASSWORD="$password" shift-bridge-test
+            -e RENDER=true -e RENDER_EXTERNAL_URL="$origin" \
+            -e SHIFT_BRIDGE_ADMIN_USER=operator -e SHIFT_BRIDGE_ADMIN_PASSWORD="$password" shift-bridge-test
           trap 'docker logs shift-bridge-render-test; docker rm -f shift-bridge-render-test >/dev/null' EXIT
           url=http://127.0.0.1:18000
           curl -fsS --max-time 2 --retry 25 --retry-delay 1 --retry-all-errors "$url/healthz"
@@ -38,9 +39,15 @@ jobs:
           curl -fsS -I "$url/about.js"
           curl -fsS "$url/demo" | grep -F 'id="demo-notice"'
           curl -fsS "$url/demo/api/logs" | jq -e '.logs | map(.ticket_no) == ["DEMO-001", "DEMO-002"]'
-          test "$(curl -sS -o /dev/null -w '%{http_code}' "$url/workspace")" = 401
+          test "$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "$url/workspace")" = "303 $url/login"
           test "$(curl -sS -o /dev/null -w '%{http_code}' "$url/api/logs")" = 401
-          curl -fsS -u "operator:$password" "$url/api/settings/status" \
+          credentials=$(jq -nc --arg password "$password" '{username: "operator", password: $password}')
+          cookie=$(curl -fsS -o /dev/null -D - -H "Origin: $origin" -H 'Content-Type: application/json' \
+            --data "$credentials" "$url/api/account/login" \
+            | awk 'tolower($1) == "set-cookie:" && $2 ~ /^shift_session=/ {sub(/;.*/, "", $2); print $2}')
+          test -n "$cookie"
+          curl -fsS -H "Cookie: $cookie" "$url/account/preferences" | grep -F '계정 탈퇴'
+          curl -fsS -H "Cookie: $cookie" "$url/api/settings/status" \
             | jq -e '.engine_ready and (.api_key_configured | not) and .signed_in_as == "operator"'
 
   release:
