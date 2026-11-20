@@ -5,6 +5,9 @@ const toggle = document.getElementById("toggle");
 const message = document.getElementById("message");
 const authChanges = new BroadcastChannel("shift-bridge-auth");
 let signup = false;
+const accountChange = new URLSearchParams(location.search).get("account");
+if (accountChange === "password") message.textContent = "비밀번호를 변경했습니다. 새 비밀번호로 로그인하세요.";
+if (accountChange === "deleted") message.textContent = "계정 탈퇴가 완료되었습니다.";
 
 function setMode(enabled) {
     signup = enabled;

@@ -43,7 +43,7 @@ async function refreshAccount() {
     document.getElementById("aiQuota").textContent = account.remaining === null
         ? "AI 생성 한도 면제" : `오늘 AI 생성 ${account.remaining}/3회 남음`;
     document.getElementById("adminLink").hidden = !account.admin;
-    document.getElementById("preferencesLink").hidden = account.admin;
+    document.getElementById("preferencesLink").hidden = false;
     document.getElementById("engineButton").hidden = !account.admin;
 }
 
@@ -67,6 +67,10 @@ document.addEventListener("DOMContentLoaded", () => {
         for (const zone of document.querySelectorAll(".upload-zone, #micBtn")) zone.inert = true;
     } else {
         const authChanges = new BroadcastChannel("shift-bridge-auth");
+        authChanges.addEventListener("message", () => {
+            document.body.style.visibility = "hidden";
+            location.replace("/workspace");
+        });
         refreshAccount().catch(console.error);
         document.getElementById("logoutButton").hidden = false;
         document.getElementById("logoutButton").addEventListener("click", async () => {

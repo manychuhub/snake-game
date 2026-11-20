@@ -23,14 +23,22 @@ class QuotaExceeded(Exception):
     pass
 
 
+class SessionExpired(Exception):
+    pass
+
+
+class LastAdministrator(Exception):
+    pass
+
+
 def init():
     with db.get_connection(db.DB_PATH) as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS web_users (
             id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
-            admin INTEGER NOT NULL DEFAULT 0, whitelisted INTEGER NOT NULL DEFAULT 0
+            admin INTEGER NOT NULL DEFAULT 0, whitelisted INTEGER NOT NULL DEFAULT 0,
+            retired INTEGER NOT NULL DEFAULT 0, bootstrap_password TEXT
         );
-        CREATE UNIQUE INDEX IF NOT EXISTS web_single_admin ON web_users(admin) WHERE admin = 1;
         CREATE TABLE IF NOT EXISTS web_sessions (
             token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires INTEGER NOT NULL
         );
@@ -46,6 +54,13 @@ def init():
         CREATE INDEX IF NOT EXISTS web_events_category ON web_events(category, id);
         CREATE INDEX IF NOT EXISTS web_events_quota ON web_events(username, category, day, result);
         """)
+        conn.execute('BEGIN IMMEDIATE')
+        columns = {row['name'] for row in conn.execute('PRAGMA table_info(web_users)')}
+        if 'retired' not in columns:
+            conn.execute('ALTER TABLE web_users ADD COLUMN retired INTEGER NOT NULL DEFAULT 0')
+        if 'bootstrap_password' not in columns:
+            conn.execute('ALTER TABLE web_users ADD COLUMN bootstrap_password TEXT')
+        conn.execute('DROP INDEX IF EXISTS web_single_admin')
 
 
 def workspace_path(user_id):
@@ -67,10 +82,22 @@ def encode_password(password):
     return salt + ':' + password_digest(password, salt)
 
 
-def create_user(username, password, *, admin=False):
+def password_matches(password, encoded):
+    valid = isinstance(password, str) and 0 < len(password) <= 256
+    salt, expected = encoded.split(':') if encoded else ('0' * 32, '0' * 64)
+    matched = hmac.compare_digest(password_digest(password if valid else '', salt), expected)
+    return bool(encoded and valid and matched)
+
+
+def validated_username(username):
     username = normalize(username)
     if not re.fullmatch(r'[a-z0-9_.-]{3,64}', username):
         raise ValueError('아이디는 영문, 숫자, 점, 밑줄, 하이픈을 사용해 3~64자로 입력하세요.')
+    return username
+
+
+def create_user(username, password, *, admin=False):
+    username = validated_username(username)
     if not admin and username == normalize(os.getenv('SHIFT_BRIDGE_ADMIN_USER', 'admin')):
         raise ValueError('사용할 수 없는 아이디입니다.')
     encoded_password = encode_password(password)
@@ -79,7 +106,7 @@ def create_user(username, password, *, admin=False):
             cursor = conn.execute('INSERT INTO web_users(username,password,admin) VALUES(?,?,?)',
                          (username, encoded_password, int(admin)))
         except sqlite3.IntegrityError:
-            raise ValueError('이미 사용 중인 아이디이거나 관리자 계정이 존재합니다.') from None
+            raise ValueError('사용할 수 없는 아이디입니다.') from None
         if not admin:
             workspace = db.workspace_db.set(workspace_path(cursor.lastrowid))
             try:
@@ -89,32 +116,58 @@ def create_user(username, password, *, admin=False):
 
 
 def bootstrap_admin(username, password, *, update_password=False):
+    username = validated_username(username)
     with db.get_connection(db.DB_PATH) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        admin = conn.execute('SELECT id,password FROM web_users WHERE admin=1').fetchone()
-        if admin:
-            if update_password:
-                salt, expected = admin['password'].split(':')
-                if not hmac.compare_digest(password_digest(password, salt), expected):
-                    set_admin_password(conn, admin['id'], encode_password(password))
+        user = conn.execute('SELECT * FROM web_users WHERE username=?', (username,)).fetchone()
+        if user is None:
+            encoded = encode_password(password)
+            conn.execute('INSERT INTO web_users(username,password,admin,bootstrap_password) VALUES(?,?,1,?)',
+                         (username, encoded, encoded if update_password else None))
             return
-    create_user(username, password, admin=True)
+        if user['retired'] or not user['admin'] or not update_password:
+            return
+        # Ordinary redeploys must preserve passwords changed by the user. A new environment value rotates it.
+        previous = user['bootstrap_password']
+        if previous and password_matches(password, previous):
+            return
+        encoded = user['password']
+        if not password_matches(password, encoded):
+            encoded = encode_password(password)
+            set_password(conn, user['id'], encoded)
+        conn.execute('UPDATE web_users SET bootstrap_password=? WHERE id=?', (encoded, user['id']))
 
 
-def set_admin_password(conn, user_id, encoded_password):
-    conn.execute('UPDATE web_users SET password=? WHERE id=?', (encoded_password, user_id))
+def revoke_sessions(conn, user_id):
     conn.execute('DELETE FROM web_sessions WHERE user_id=?', (user_id,))
+
+
+def set_password(conn, user_id, encoded_password):
+    conn.execute('UPDATE web_users SET password=? WHERE id=?', (encoded_password, user_id))
+    revoke_sessions(conn, user_id)
 
 
 def reset_admin_password(username, password):
     encoded_password = encode_password(password)
     with db.get_connection(db.DB_PATH) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        user = conn.execute('SELECT id FROM web_users WHERE username=? AND admin=1',
+        user = conn.execute('SELECT id FROM web_users WHERE username=? AND admin=1 AND retired=0',
                             (normalize(username),)).fetchone()
         if user is None:
             raise ValueError('관리자 계정을 찾을 수 없습니다.')
-        set_admin_password(conn, user['id'], encoded_password)
+        set_password(conn, user['id'], encoded_password)
+
+
+def grant_admin(username, password):
+    with db.get_connection(db.DB_PATH) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        user = conn.execute('SELECT id,password,admin FROM web_users WHERE username=? AND retired=0',
+                            (normalize(username),)).fetchone()
+        if user is None or not password_matches(password, user['password']):
+            raise ValueError('활성 계정과 현재 비밀번호를 확인하세요.')
+        if not user['admin']:
+            conn.execute('UPDATE web_users SET admin=1 WHERE id=?', (user['id'],))
+            revoke_sessions(conn, user['id'])
 
 
 def token_hash(token):
@@ -126,14 +179,11 @@ def login(username, password):
     if not re.fullmatch(r'[a-z0-9_.-]{3,64}', username):
         username = ''
     with db.get_connection(db.DB_PATH) as conn:
-        user = conn.execute('SELECT * FROM web_users WHERE username=?', (username,)).fetchone()
-        valid_password = isinstance(password, str) and 0 < len(password) <= 256
-        salt, expected = user['password'].split(':') if user else ('0' * 32, '0' * 64)
-        matched = hmac.compare_digest(password_digest(password if valid_password else '', salt), expected)
-        accepted = bool(user and valid_password and matched)
+        user = conn.execute('SELECT id,password FROM web_users WHERE username=? AND retired=0', (username,)).fetchone()
+        accepted = password_matches(password, user['password'] if user else None)
         if accepted:
             conn.execute('BEGIN IMMEDIATE')
-            current = conn.execute('SELECT password FROM web_users WHERE id=?', (user['id'],)).fetchone()
+            current = conn.execute('SELECT password FROM web_users WHERE id=? AND retired=0', (user['id'],)).fetchone()
             accepted = bool(current and hmac.compare_digest(current['password'], user['password']))
         add_event(conn, username, 'login', '로그인', 'success' if accepted else 'failed')
         if accepted:
@@ -149,15 +199,50 @@ def session(token):
     if not token:
         return None
     with db.get_connection(db.DB_PATH) as conn:
-        return conn.execute(
-            'SELECT u.id,u.username,u.admin,u.whitelisted FROM web_sessions s JOIN web_users u '
-            'ON u.id=s.user_id WHERE s.token=? AND s.expires>?',
-            (token_hash(token), int(time.time()))).fetchone()
+        return session_user(conn, token)
+
+
+def session_user(conn, token, *, credentials=False):
+    columns = 'u.id,u.username,u.admin,u.whitelisted' + (',u.password' if credentials else '')
+    return conn.execute(
+        f'SELECT {columns} FROM web_sessions s JOIN web_users u ON u.id=s.user_id '
+        'WHERE s.token=? AND s.expires>? AND u.retired=0',
+        (token_hash(token), int(time.time()))).fetchone()
 
 
 def logout(token):
     with db.get_connection(db.DB_PATH) as conn:
         conn.execute('DELETE FROM web_sessions WHERE token=?', (token_hash(token),))
+
+
+def change_account(user_id, token, current_password, *, new_password=None, delete=False):
+    with db.get_connection(db.DB_PATH) as conn:
+        user = session_user(conn, token, credentials=True)
+        if user is None or user['id'] != user_id:
+            raise SessionExpired
+        if not password_matches(current_password, user['password']):
+            raise ValueError('현재 비밀번호를 확인하세요.')
+        if not delete:
+            if current_password == new_password:
+                raise ValueError('현재 비밀번호와 다른 새 비밀번호를 입력하세요.')
+            encoded = encode_password(new_password)
+
+        conn.execute('BEGIN IMMEDIATE')
+        current = session_user(conn, token, credentials=True)
+        if (current is None or current['id'] != user_id
+                or not hmac.compare_digest(current['password'], user['password'])):
+            raise SessionExpired
+        if not delete:
+            set_password(conn, user_id, encoded)
+            return
+        if current['admin'] and not conn.execute(
+                'SELECT 1 FROM web_users WHERE admin=1 AND retired=0 AND id<>?', (user_id,)).fetchone():
+            raise LastAdministrator
+        revoke_sessions(conn, user_id)
+        conn.execute('DELETE FROM web_preferences WHERE user_id=?', (user_id,))
+        # Keep the ID and username reserved while retaining work records and audit history.
+        conn.execute('''UPDATE web_users SET retired=1, password='', bootstrap_password=NULL,
+                        admin=0, whitelisted=0 WHERE id=?''', (user_id,))
 
 
 def get_preferences(user_id):
@@ -225,7 +310,9 @@ def track_generation(user, feature):
     username = user['username']
     with db.get_connection(db.DB_PATH) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        current = conn.execute('SELECT admin,whitelisted FROM web_users WHERE id=?', (user['id'],)).fetchone()
+        current = conn.execute('SELECT admin,whitelisted FROM web_users WHERE id=? AND retired=0', (user['id'],)).fetchone()
+        if current is None:
+            raise SessionExpired
         day = today()
         limited = not (current['admin'] or current['whitelisted']) and ai_count(conn, username, day) >= DAILY_LIMIT
         event_id = add_event(conn, username, 'ai', feature, 'limited' if limited else 'started', day)
@@ -255,14 +342,14 @@ def dashboard(category, before, query=''):
 def members(query, before):
     with db.get_connection(db.DB_PATH) as conn:
         rows = conn.execute(
-            'SELECT id,username,whitelisted FROM web_users WHERE admin=0 AND id<? '
+            'SELECT id,username,whitelisted FROM web_users WHERE admin=0 AND retired=0 AND id<? '
             'AND instr(username,?)>0 ORDER BY id DESC LIMIT 101', (before, query)).fetchall()
         return {'users': [dict(row) for row in rows[:100]], 'next': rows[99]['id'] if len(rows) > 100 else None}
 
 
 def whitelist(user_id, enabled, actor):
     with db.get_connection(db.DB_PATH) as conn:
-        cursor = conn.execute('UPDATE web_users SET whitelisted=? WHERE id=? AND admin=0', (enabled, user_id))
+        cursor = conn.execute('UPDATE web_users SET whitelisted=? WHERE id=? AND admin=0 AND retired=0', (enabled, user_id))
         if cursor.rowcount:
             add_event(conn, actor, 'feature', '화이트리스트 ' + ('추가' if enabled else '해제'), f'계정 #{user_id}')
         return bool(cursor.rowcount)
@@ -271,17 +358,24 @@ def whitelist(user_id, enabled, actor):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SHIFT BRIDGE 관리자 계정 관리')
     parser.add_argument('username')
-    parser.add_argument('--reset-password', action='store_true', help='기존 관리자 비밀번호를 재설정합니다.')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--reset-password', action='store_true', help='기존 관리자 비밀번호를 재설정합니다.')
+    mode.add_argument('--grant-admin', action='store_true', help='기존 계정에 관리자 권한을 부여합니다.')
     args = parser.parse_args()
-    password = getpass.getpass('관리자 비밀번호: ')
-    if password != getpass.getpass('비밀번호 확인: '):
+    password = getpass.getpass('현재 비밀번호: ' if args.grant_admin else '관리자 비밀번호: ')
+    if not args.grant_admin and password != getpass.getpass('비밀번호 확인: '):
         parser.error('비밀번호가 일치하지 않습니다.')
     init()
     try:
         if args.reset_password:
             reset_admin_password(args.username, password)
+            result = '관리자 비밀번호를 재설정했습니다.'
+        elif args.grant_admin:
+            grant_admin(args.username, password)
+            result = '관리자 권한을 부여했습니다.'
         else:
             create_user(args.username, password, admin=True)
+            result = '관리자 계정을 생성했습니다.'
     except ValueError as error:
         parser.error(str(error))
-    print('관리자 비밀번호를 재설정했습니다.' if args.reset_password else '관리자 계정을 생성했습니다.')
+    print(result)

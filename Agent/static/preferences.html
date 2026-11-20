@@ -14,6 +14,30 @@
             <a href="/workspace">업무 화면으로</a>
         </header>
         <section class="admin-panel preferences-panel" id="preferences" aria-labelledby="preferences-title"></section>
+        <section class="admin-panel" aria-labelledby="password-title">
+            <h2 id="password-title">비밀번호 변경</h2>
+            <form method="post" action="/api/account/password" data-account-action="password">
+                <fieldset class="preferences-fields" disabled>
+                    <label>현재 비밀번호<input name="current_password" type="password" autocomplete="current-password" maxlength="256" required></label>
+                    <label>새 비밀번호<input name="new_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+                    <label>새 비밀번호 확인<input name="confirm_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+                    <button type="submit">비밀번호 변경</button>
+                </fieldset>
+                <p class="account-action-status" role="status"></p>
+            </form>
+        </section>
+        <section class="admin-panel" aria-labelledby="withdrawal-title">
+            <h2 id="withdrawal-title">계정 탈퇴</h2>
+            <p>로그인 정보와 기본 장소 설정이 삭제됩니다. 업무 기록과 감사 이력은 보존됩니다.</p>
+            <form method="post" action="/api/account/delete" data-account-action="deleted">
+                <fieldset class="withdrawal-fields" disabled>
+                    <label>현재 비밀번호<input name="current_password" type="password" autocomplete="current-password" maxlength="256" required></label>
+                    <label class="withdrawal-confirm"><input name="confirmed" type="checkbox" required> 계정 탈퇴를 확인합니다.</label>
+                    <button class="danger" type="submit">계정 탈퇴</button>
+                </fieldset>
+                <p class="account-action-status" role="status"></p>
+            </form>
+        </section>
     </main>
 </body>
 </html>

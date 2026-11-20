@@ -176,16 +176,80 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.request('POST', '/api/account/logout', {}, visitor)[0], 200)
         self.assertEqual(self.request('GET', '/api/account/me', headers=visitor)[0], 401)
 
-    def test_admin_password_reset_revokes_sessions_and_keeps_one_admin(self):
-        with self.assertRaises(ValueError):
-            accounts.create_user('another-admin', 'another-password', admin=True)
+    def test_admin_password_reset_revokes_only_the_selected_admins_sessions(self):
+        accounts.create_user('another-admin', 'another-password', admin=True)
+        other = {'Cookie': 'shift_session=' + accounts.login('another-admin', 'another-password')}
         accounts.reset_admin_password('admin', 'replacement-password')
         self.assertEqual(self.request('GET', '/api/admin/login')[0], 401)
+        self.assertEqual(self.request('GET', '/api/admin/login', headers=other)[0], 200)
         self.assertIsNone(accounts.login('admin', 'test-admin-password'))
         self.cookie = 'shift_session=' + accounts.login('admin', 'replacement-password')
         status, page = self.request('GET', '/admin')
         self.assertEqual(status, 200)
         self.assertIn('AI 생성 테스트', page)
+
+    def test_account_password_change_checks_identity_and_survives_redeploy(self):
+        path = '/api/account/password'
+        old = 'test-admin-password'
+        new = 'changed-admin-password'
+        accounts.bootstrap_admin('admin', old, update_password=True)
+        second = {'Cookie': 'shift_session=' + accounts.login('admin', old)}
+        user = self.request('GET', '/api/account/preferences')[1]
+        body = {'account_id': user['account_id'], 'current_password': old, 'new_password': new}
+        self.assertEqual(self.request('POST', path, body, {'Cookie': ''})[0], 401)
+        self.assertEqual(self.request('POST', path, {**body, 'account_id': 'unknown'})[0], 409)
+        self.assertEqual(self.request('POST', path, {**body, 'current_password': 'wrong'})[0], 400)
+        self.assertEqual(self.request('POST', path, {**body, 'new_password': old})[0], 400)
+        self.assertEqual(self.request('POST', path, body, {'Origin': 'https://other.example'})[0], 403)
+        self.assertEqual(self.request('POST', path, body)[0], 200)
+        self.assertIn('Max-Age=0', self.response_headers['Set-Cookie'])
+        self.assertEqual(self.request('GET', '/api/account/me')[0], 401)
+        self.assertEqual(self.request('GET', '/api/account/me', headers=second)[0], 401)
+        accounts.bootstrap_admin('admin', old, update_password=True)
+        self.assertIsNone(accounts.login('admin', old))
+        self.assertIsNotNone(accounts.login('admin', new))
+        accounts.bootstrap_admin('admin', 'rotated-environment-password', update_password=True)
+        self.assertIsNone(accounts.login('admin', new))
+        self.assertIsNotNone(accounts.login('admin', 'rotated-environment-password'))
+
+    def test_withdrawal_requires_confirmation_and_preserves_work_and_last_admin(self):
+        path = '/api/account/delete'
+        admin_id = self.request('GET', '/api/account/preferences')[1]['account_id']
+        self.assertEqual(self.request('POST', path, {
+            'account_id': admin_id, 'current_password': 'test-admin-password', 'confirmed': True})[0], 409)
+
+        username, password = 'retiring-member', 'retiring-member-password'
+        accounts.create_user(username, password)
+        member = {'Cookie': 'shift_session=' + accounts.login(username, password)}
+        data = self.request('GET', '/api/account/preferences', headers=member)[1]
+        self.assertEqual(self.request('POST', '/api/account/preferences', {
+            'account_id': data['account_id'], 'default_location': '테스트 장소', 'place_type': '사무실'}, member)[0], 200)
+        self.assertEqual(self.request('POST', '/api/logs/create', {
+            'raw_text': 'member work record', 'status': '완료'}, member)[0], 200)
+
+        accounts.grant_admin(username, password)
+        self.assertEqual(self.request('GET', '/api/account/me', headers=member)[0], 401)
+        member = {'Cookie': 'shift_session=' + accounts.login(username, password)}
+        other_session = {'Cookie': 'shift_session=' + accounts.login(username, password)}
+        self.assertEqual(self.request('GET', '/api/admin/login', headers=member)[0], 200)
+        self.assertEqual(self.request('GET', '/api/logs', headers=member)[1]['logs'][0]['raw_text'], 'member work record')
+        body = {'account_id': data['account_id'], 'current_password': password}
+        self.assertEqual(self.request('POST', path, body, member)[0], 400)
+        self.assertEqual(self.request('POST', path, {**body, 'confirmed': True, 'current_password': 'wrong'}, member)[0], 400)
+        self.assertEqual(self.request('POST', path, {**body, 'confirmed': True}, member)[0], 200)
+        self.assertIn('Max-Age=0', self.response_headers['Set-Cookie'])
+        self.assertEqual(self.request('GET', '/api/account/me', headers=other_session)[0], 401)
+        self.assertEqual(self.request('GET', '/api/admin/login')[0], 200)
+        accounts.bootstrap_admin(username, password, update_password=True)
+        self.assertIsNone(accounts.login(username, password))
+        with self.assertRaises(ValueError):
+            accounts.create_user(username, password)
+        with database.get_connection() as conn:
+            user = conn.execute('SELECT retired,password FROM web_users WHERE username=?', (username,)).fetchone()
+            self.assertEqual(tuple(user), (1, ''))
+            self.assertIsNone(conn.execute('SELECT 1 FROM web_preferences WHERE user_id=?', (data['account_id'],)).fetchone())
+        with database.get_connection(accounts.workspace_path(data['account_id'])) as conn:
+            self.assertEqual(conn.execute('SELECT raw_text FROM work_logs').fetchone()[0], 'member work record')
 
     def test_place_preferences_are_private_to_the_signed_in_account(self):
         path = '/api/account/preferences'

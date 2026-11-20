@@ -24,18 +24,32 @@
     const logout = panel.querySelector("[data-logout]");
     const retry = panel.querySelector("[data-retry]");
     const status = panel.querySelector("[role=status]");
+    const accountForms = [...main.querySelectorAll("[data-account-action]")].map(form => ({
+        form, fields: form.querySelector("fieldset"), status: form.querySelector("[role=status]")
+    }));
     const authChanges = new BroadcastChannel("shift-bridge-auth");
     const jsonPost = {method: "POST", headers: {"Content-Type": "application/json"}};
     let accountId = null;
     let revision = 0;
+    let changingAccount = false;
+
+    function enableForms() {
+        const disabled = accountId === null || changingAccount;
+        fields.disabled = disabled;
+        for (const action of accountForms) action.fields.disabled = disabled;
+    }
 
     function clear() {
         ++revision;
         accountId = null;
-        fields.disabled = true;
+        enableForms();
         form.reset();
         account.textContent = status.textContent = "";
         retry.hidden = true;
+        for (const action of accountForms) {
+            action.form.reset();
+            action.status.textContent = "";
+        }
     }
 
     function show(data) {
@@ -43,7 +57,7 @@
         account.textContent = data.username;
         form.elements.default_location.value = data.default_location;
         form.elements.place_type.value = data.place_type;
-        fields.disabled = false;
+        enableForms();
     }
 
     function leave(path) {
@@ -102,6 +116,43 @@
             if (current === revision) fields.disabled = false;
         }
     });
+
+    for (const action of accountForms) {
+        action.form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (accountId === null || changingAccount || fields.disabled) return;
+            const {current_password, new_password, confirm_password, confirmed} = action.form.elements;
+            if (new_password && new_password.value !== confirm_password.value) {
+                action.status.textContent = "새 비밀번호 확인이 일치하지 않습니다.";
+                return;
+            }
+            const body = {
+                account_id: accountId, current_password: current_password.value,
+                new_password: new_password?.value, confirmed: confirmed?.checked
+            };
+            const previousAccount = accountId;
+            changingAccount = true;
+            enableForms();
+            action.status.textContent = "처리 중…";
+            try {
+                const response = await fetch(action.form.action, {...jsonPost, body: JSON.stringify(body)});
+                if (response.ok) {
+                    authChanges.postMessage("changed");
+                    if (!main.hidden) leave(`/login?account=${action.form.dataset.accountAction}`);
+                    return;
+                }
+                if (accountId !== previousAccount) return;
+                if (response.status === 401) return leave("/login");
+                const data = await response.json();
+                if (accountId === previousAccount) action.status.textContent = data.error || "계정을 변경하지 못했습니다.";
+            } catch {
+                if (accountId === previousAccount) action.status.textContent = "계정을 변경하지 못했습니다.";
+            } finally {
+                changingAccount = false;
+                enableForms();
+            }
+        });
+    }
 
     logout.addEventListener("click", async () => {
         logout.disabled = true;

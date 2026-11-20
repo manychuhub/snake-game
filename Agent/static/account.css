@@ -30,6 +30,7 @@ input { background: #0d1829; color: inherit; min-width: 0; }
 button { background: #9ec6ff; color: #101c30; font-weight: 650; cursor: pointer; }
 button:disabled { opacity: .55; cursor: default; }
 button.secondary, button[aria-pressed="false"] { background: #202f48; color: inherit; }
+button.danger { background: #ffb5be; color: #481020; border-color: #ffb5be; }
 :focus-visible { outline: 2px solid #ffd58a; outline-offset: 3px; }
 #message { color: #ffcf93; min-height: 1.55em; }
 .admin { margin: auto; max-width: 76rem; padding: 2rem 1rem; }
@@ -60,6 +61,19 @@ button.secondary, button[aria-pressed="false"] { background: #202f48; color: inh
 }
 .preferences-fields label { display: grid; gap: .25rem; }
 .preferences-fields button { justify-self: start; }
+.withdrawal-fields {
+    display: grid;
+    justify-items: start;
+    gap: .75rem;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+}
+.withdrawal-fields label:first-child { display: grid; gap: .25rem; }
+.withdrawal-confirm { display: flex; align-items: center; gap: .4rem; }
+.account-action-status { color: #ffcf93; margin: .75rem 0 0; }
+.account-action-status:empty { margin: 0; }
 .preferences-panel [role="status"] { margin: .75rem 0 0; }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; text-align: left; }

@@ -30,6 +30,6 @@
 
 ## 기록 저장
 
-기존 관리자 비밀번호를 변경하려면 서비스의 **Environment**에서 `SHIFT_BRIDGE_ADMIN_PASSWORD`를 24~256자의 새 값으로 저장하고 재배포합니다. 시작 시 현재 DB의 관리자 계정에 적용되며 기존 로그인 세션은 종료됩니다. `SHIFT_BRIDGE_ADMIN_USER`는 최초 생성 시에만 사용됩니다.
+관리자는 **계정 설정**에서 비밀번호를 변경할 수 있습니다. Render에서 재설정하려면 서비스의 **Environment**에서 `SHIFT_BRIDGE_ADMIN_PASSWORD`를 24~256자의 새 값으로 저장하고 재배포합니다. 변경된 환경값은 `SHIFT_BRIDGE_ADMIN_USER`에 지정된 관리자에게 적용되며 해당 계정의 기존 세션이 종료됩니다. 같은 환경값으로 재배포하면 계정 설정에서 바꾼 비밀번호가 유지됩니다.
 
 무료 서비스는 재배포, 재시작 또는 절전 시 SQLite 기록을 잃을 수 있으므로 가상 데이터로 테스트하세요. 기록을 유지하려면 유료 서비스에 Persistent Disk를 `/var/data`에 마운트합니다. 관리자 계정은 최초 실행 시 초기 비밀번호로 생성됩니다. 회원은 로그인 화면에서 직접 가입합니다. 계정, 사용자별 작업 DB 및 관리자 로그는 디스크에 저장됩니다. 실제 DCO 운영 자료를 사용하려면 조직에서 승인한 호스팅, 데이터 보존 정책과 Gemini 사용 범위를 확인하세요. [무료 서비스 제한](https://render.com/docs/free) · [Render Persistent Disk](https://render.com/docs/disks)

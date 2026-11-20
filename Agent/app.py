@@ -140,7 +140,9 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
 
     @contextmanager
     def member_workspace(self, path):
-        workspace = db.workspace_db.set(None if self.member['admin'] else accounts.workspace_path(self.member['id']))
+        personal = accounts.workspace_path(self.member['id'])
+        # Members promoted to administrator keep their existing workspace.
+        workspace = db.workspace_db.set(personal if not self.member['admin'] or personal.is_file() else None)
         tracker = gemini.generation_tracker.set(partial(accounts.track_generation, self.member, path))
         try:
             self.feature_path = path
@@ -328,6 +330,23 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
         if path == '/api/account/logout':
             accounts.logout(self.session_token())
             return self.send_json({'success': True}, headers=(self.session_cookie('', 0),))
+        if path in {'/api/account/password', '/api/account/delete'}:
+            user_id = self.member['id']
+            if body.get('account_id') != str(user_id):
+                return self.send_json({'error': '현재 로그인 계정의 설정을 다시 불러오세요.'}, 409)
+            delete = path == '/api/account/delete'
+            if delete and body.get('confirmed') is not True:
+                return self.send_json({'error': '계정 탈퇴 확인란을 선택하세요.'}, 400)
+            try:
+                accounts.change_account(user_id, self.session_token(), body.get('current_password'),
+                                        new_password=body.get('new_password'), delete=delete)
+            except accounts.SessionExpired:
+                return self.send_json({'error': '로그인이 필요합니다.'}, 401)
+            except accounts.LastAdministrator:
+                return self.send_json({'error': '마지막 관리자 계정은 탈퇴할 수 없습니다.'}, 409)
+            except ValueError as error:
+                return self.send_json({'error': str(error)}, 400)
+            return self.send_json({'success': True}, headers=(self.session_cookie('', 0),))
         if path == PREFERENCES_API:
             user_id = self.member['id']
             # The browser's account ID is a stale-form check. Ownership comes from the session.
@@ -354,6 +373,8 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
                 self.route_post(body)
             except accounts.QuotaExceeded:
                 self.send_json({'error': '오늘의 AI 생성 한도 3회를 모두 사용했습니다. 한국 시간 자정에 초기화됩니다.'}, 429)
+            except accounts.SessionExpired:
+                self.send_json({'error': '로그인이 필요합니다.'}, 401)
             except gemini.BridgeError as error:
                 self.send_json({'error': str(error)}, 502)
             except (TypeError, AttributeError, ValueError):
