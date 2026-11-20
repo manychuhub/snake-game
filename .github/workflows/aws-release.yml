@@ -24,9 +24,48 @@ jobs:
           BRIDGE_DATA_DIR=$(mktemp -d) PYTHONPATH=BridgeCLI python -m unittest discover -s BridgeCLI/tests -v
           node --check Agent/static/app.js
           docker build -t shift-bridge-test .
+      - name: Verify Render public intro, demo, and workspace login
+        run: |
+          set -euo pipefail
+          password=synthetic-smoke-test-password
+          origin=https://shift-bridge-example.onrender.com
+          docker run -d --name shift-bridge-render-test -p 127.0.0.1:18000:10000 \
+            -e RENDER=true -e RENDER_EXTERNAL_URL="$origin" \
+            -e SHIFT_BRIDGE_STORAGE_MODE=sqlite \
+            -e SHIFT_BRIDGE_ADMIN_USER=operator -e SHIFT_BRIDGE_ADMIN_PASSWORD="$password" shift-bridge-test
+          trap 'docker logs shift-bridge-render-test; docker rm -f shift-bridge-render-test >/dev/null' EXIT
+          url=http://127.0.0.1:18000
+          curl -fsS --max-time 2 --retry 25 --retry-delay 1 --retry-all-errors "$url/healthz"
+          curl -fsS "$url/" | grep -F '에이전트 소개 · SHIFT BRIDGE'
+          curl -fsS -I "$url/about.js"
+          curl -fsS "$url/demo" | grep -F 'id="demo-notice"'
+          curl -fsS "$url/demo/api/logs" | jq -e '.logs | map(.ticket_no) == ["DEMO-001", "DEMO-002"]'
+          test "$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "$url/workspace")" = "303 $url/login"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "$url/api/logs")" = 401
+          credentials=$(jq -nc --arg password "$password" '{username: "operator", password: $password}')
+          cookie=$(curl -fsS -o /dev/null -D - -H "Origin: $origin" -H 'Content-Type: application/json' \
+            --data "$credentials" "$url/api/account/login" \
+            | awk 'tolower($1) == "set-cookie:" && $2 ~ /^shift_session=/ {sub(/;.*/, "", $2); print $2}')
+          test -n "$cookie"
+          curl -fsS -H "Cookie: $cookie" "$url/account/preferences" | grep -F '계정 탈퇴'
+          curl -fsS -H "Cookie: $cookie" "$url/api/settings/status" \
+            | jq -e '.engine_ready and (.api_key_configured | not) and .signed_in_as == "operator"'
+      - name: Verify SQLite restoration, PostgreSQL RLS, and restart durability
+        run: |
+          set -euo pipefail
+          docker run -d --name shift-bridge-db-test -p 127.0.0.1:15432:5432 \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=shift_bridge_test_ci postgres:17
+          trap 'docker rm -f shift-bridge-db-test >/dev/null' EXIT
+          for attempt in {1..30}; do
+            if docker exec shift-bridge-db-test pg_isready -h 127.0.0.1 -U postgres -d shift_bridge_test_ci; then break; fi
+            sleep 1
+          done
+          export SHIFT_BRIDGE_TEST_DATABASE_URL='host=127.0.0.1 port=15432 dbname=shift_bridge_test_ci user=postgres'
+          export PYTHONPATH="$PWD:$PWD/Agent:$PWD/BridgeCLI:$PWD/deploy"
+          /tmp/shift-bridge-tests/bin/python deploy/test_postgres_migration.py -v
 
   release:
-    if: github.ref == format('refs/heads/{0}', vars.AWS_RELEASE_BRANCH || 'shift-bridge') && github.event_name != 'pull_request' && vars.AWS_RELEASE_ROLE_ARN != ''
+    if: github.ref == format('refs/heads/{0}', vars.AWS_RELEASE_BRANCH || 'shift-bridge') && github.event_name != 'pull_request' && vars.AWS_RELEASE_ROLE_ARN != '' && !contains(github.event.head_commit.message, '[skip aws]')
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 25

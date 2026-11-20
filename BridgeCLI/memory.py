@@ -1,9 +1,14 @@
-import sqlite3,json, re, math
+import sqlite3,json, re, math, os
 from datetime import datetime,timezone
 from contextlib import contextmanager,closing
 from config import DATA
 class Memory:
     def __init__(self,path=None):
+        self.dsn = os.getenv('SHIFT_BRIDGE_ENGINE_DATABASE_URL') if path is None else None
+        if self.dsn:
+            import postgres_store
+            postgres_store.verify(self.dsn, engine=True)
+            return
         self.path=path or DATA/'bridge.db'; self.path.parent.mkdir(parents=True,exist_ok=True)
         with self.db() as c:
             c.executescript('''CREATE TABLE IF NOT EXISTS records(id INTEGER PRIMARY KEY, created TEXT NOT NULL, body TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, embedding TEXT, embed_model TEXT);
@@ -12,11 +17,16 @@ class Memory:
             CREATE TABLE IF NOT EXISTS usage(id INTEGER PRIMARY KEY, created TEXT NOT NULL, task TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER, thinking_tokens INTEGER, total_tokens INTEGER);''')
     @contextmanager
     def db(self):
+        if self.dsn:
+            import postgres_store
+            with postgres_store.database(self.dsn, engine=True) as connection:
+                yield connection
+            return
         with closing(sqlite3.connect(self.path,timeout=10)) as c:
             c.row_factory=sqlite3.Row
             with c: yield c
     def add(self,body,approved=False):
-        with self.db() as c: return c.execute('INSERT INTO records(created,body,approved) VALUES(?,?,?)',(now(),json.dumps(body,ensure_ascii=False),int(approved))).lastrowid
+        with self.db() as c: return c.execute('INSERT INTO records(created,body,approved) VALUES(?,?,?) RETURNING id',(now(),json.dumps(body,ensure_ascii=False),int(approved))).fetchone()[0]
     def update(self,id,body=None,approve=False):
         with self.db() as c:
             old=c.execute('SELECT * FROM records WHERE id=?',(id,)).fetchone()
@@ -30,9 +40,9 @@ class Memory:
     def docs(self):
         with self.db() as c: return [dict(r) for r in c.execute('SELECT * FROM documents ORDER BY id DESC')]
     def add_doc(self,name,page,text):
-        with self.db() as c: return c.execute('INSERT INTO documents(created,name,page,text) VALUES(?,?,?,?)',(now(),name,page,text)).lastrowid
+        with self.db() as c: return c.execute('INSERT INTO documents(created,name,page,text) VALUES(?,?,?,?) RETURNING id',(now(),name,page,text)).fetchone()[0]
     def report(self,body):
-        with self.db() as c: return c.execute('INSERT INTO reports(created,body) VALUES(?,?)',(now(),json.dumps(body,ensure_ascii=False))).lastrowid
+        with self.db() as c: return c.execute('INSERT INTO reports(created,body) VALUES(?,?) RETURNING id',(now(),json.dumps(body,ensure_ascii=False))).fetchone()[0]
     def approve_report(self,id,text=None):
         with self.db() as c:
             r=c.execute('SELECT body FROM reports WHERE id=?',(id,)).fetchone()

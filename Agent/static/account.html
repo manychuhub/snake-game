@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>로그인 · SHIFT BRIDGE</title>
+    <link rel="stylesheet" href="/account.css">
+    <script src="/account.js" defer></script>
+</head>
+<body class="auth">
+    <main class="card">
+        <a class="brand-link" href="/about">SHIFT BRIDGE</a>
+        <h1 id="title">로그인</h1>
+        <form id="credentials" method="post" action="/api/account/login">
+            <label for="username">아이디</label>
+            <input id="username" name="username" autocomplete="username" required maxlength="64">
+            <label for="password">비밀번호</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+            <button id="submit">로그인</button>
+        </form>
+        <p id="message" role="status"></p>
+        <button class="secondary" id="toggle" type="button">회원가입</button>
+    </main>
+</body>
+</html>

@@ -4,9 +4,12 @@
 SHIFT BRIDGE - AWS DCO AI 업무 인수인계 시스템
 [Main Web Application Server]
 - 정적 웹 UI와 JSON API를 제공하는 서버
-- 로컬 루프백 또는 인증된 AWS ALB 뒤에서 실행
+- 로컬 루프백 또는 인증된 HTTPS 프록시 뒤에서 실행
 """
 import os
+import base64
+import hashlib
+import hmac
 import sys
 import json
 import time
@@ -14,18 +17,34 @@ import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler
+from http.cookies import CookieError, SimpleCookie
+from contextlib import contextmanager
+from functools import partial
 from socketserver import ThreadingTCPServer
 
+import accounts
 import database as db
+import demo
 import gemini_client as gemini
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-STATIC_PATHS = {'/', '/index.html', '/style.css', '/app.js'}
+STATIC_ALIASES = {'/': '/index.html', '/workspace': '/index.html', '/workspace/': '/index.html',
+                  '/account/preferences': '/preferences.html',
+                  '/login': '/account.html', '/admin': '/admin.html', '/demo': '/index.html', '/demo/': '/index.html', '/about': '/about.html', '/about/': '/about.html'}
+INTRO_FILES = {'/about.html', '/about.css', '/about.js'}
+STATIC_PATHS = {'/index.html', '/style.css', '/app.js'} | INTRO_FILES | {
+    '/account.html', '/admin.html', '/account.css', '/account.js', '/admin.js', '/preferences.html', '/preferences.js'}
+RENDER_PUBLIC_PATHS = {'/demo', '/demo/', '/style.css', '/app.js'} | INTRO_FILES
 
 PORT = int(os.environ.get("PORT", 8000))
 HOST = os.getenv('SHIFT_BRIDGE_WEB_HOST', '127.0.0.1')
 EXPECTED_SIGNER = os.getenv('SHIFT_BRIDGE_ALB_ARN')
 PUBLIC_ORIGIN = os.getenv('SHIFT_BRIDGE_PUBLIC_ORIGIN')
+WEB_USER = os.getenv('SHIFT_BRIDGE_WEB_USER')
+WEB_CREDENTIAL = os.getenv('SHIFT_BRIDGE_WEB_CREDENTIAL')
+ON_RENDER = os.getenv('RENDER') == 'true'
+PUBLIC_ACCOUNT_FILES = {'/login', '/account.css', '/account.js'}
+PREFERENCES_API = '/api/account/preferences'
 MAX_REQUEST_BYTES = 14_000_000
 
 if EXPECTED_SIGNER:
@@ -66,18 +85,87 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             if not self.subject:
                 self.send_json({'error': '인증된 세션이 필요합니다.'}, 401)
                 return False
-        else:
+        elif WEB_USER and WEB_CREDENTIAL:
+            values = self.headers.get_all('Authorization', [])
+            if len(values) == 1:
+                scheme, _, payload = values[0].partition(' ')
+                if scheme.lower() == 'basic' and len(payload) <= 4096:
+                    try:
+                        credential = base64.b64decode(payload, validate=True)
+                    except ValueError:
+                        credential = b''
+                    digest = hashlib.sha256(credential).hexdigest()
+                    if hmac.compare_digest(digest, WEB_CREDENTIAL):
+                        self.subject = WEB_USER
+                        return True
+            self.send_json({'error': '로그인이 필요합니다.'}, 401,
+                           headers=(('WWW-Authenticate', 'Basic realm="SHIFT BRIDGE", charset="UTF-8"'),))
+            return False
+        elif not PUBLIC_ORIGIN:
             port = self.server.server_address[1]
             if self.headers.get('Host') not in {f'127.0.0.1:{port}', f'localhost:{port}'}:
                 self.send_json({'error': '로컬 웹 주소로 접속하세요.'}, 403)
                 return False
         return True
 
-    def send_json(self, data, status_code=200):
+    def session_token(self):
+        cookies = SimpleCookie()
+        try:
+            cookies.load(self.headers.get('Cookie', ''))
+        except CookieError:
+            return ''
+        token = cookies.get('shift_session')
+        return token.value if token and len(token.value) == 43 else ''
+
+    def session_cookie(self, token, max_age):
+        secure = '; Secure' if PUBLIC_ORIGIN else ''
+        return ('Set-Cookie', f'shift_session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict{secure}')
+
+    def require_member(self, path, *, admin=False):
+        self.member = accounts.session(self.session_token())
+        if self.member is None:
+            if not path.startswith(('/api/', '/demo/api/')):
+                self.send_response(303)
+                self.send_header('Location', '/login')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+            else:
+                self.send_json({'error': '로그인이 필요합니다.'}, 401)
+            return False
+        if admin and not self.member['admin']:
+            self.send_json({'error': '관리자 권한이 필요합니다.'}, 403)
+            return False
+        self.subject = self.member['username']
+        return True
+
+    @contextmanager
+    def member_workspace(self, path):
+        personal = accounts.workspace_path(self.member['id'])
+        if db.postgres_enabled():
+            use_personal = self.member['personal_workspace']
+        else:
+            use_personal = not self.member['admin'] or personal.is_file()
+        workspace = db.workspace_db.set(personal if use_personal else None)
+        workspace_id = db.workspace_id.set(self.member['id'] if use_personal else 0)
+        tracker = gemini.generation_tracker.set(partial(accounts.track_generation, self.member, path))
+        try:
+            self.feature_path = path
+            yield
+        finally:
+            self.feature_path = None
+            gemini.generation_tracker.reset(tracker)
+            db.workspace_db.reset(workspace)
+            db.workspace_id.reset(workspace_id)
+
+    def send_json(self, data, status_code=200, *, headers=()):
+        if getattr(self, 'feature_path', None):
+            accounts.feature_event(self.subject, self.feature_path, status_code)
         body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         if self.command != 'HEAD':
             self.wfile.write(body)
@@ -101,20 +189,75 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
     # GET 요청 라우팅
     # ==========================================================================
     def do_GET(self):
-        if self.path == '/healthz':
-            return self.send_json({'status': 'ok'})
-        if not self.authorize():
-            return
         try:
-            self.route_get()
-        except gemini.BridgeError as error:
-            self.send_json({'error': str(error)}, 502)
+            self.read_request()
+        except db.DatabaseUnavailable:
+            self.send_json({'error': '데이터베이스에 연결할 수 없습니다.'}, 503)
 
     def do_HEAD(self):
-        if self.authorize():
-            if urllib.parse.urlsplit(self.path).path in STATIC_PATHS:
-                return super().do_HEAD()
-            self.send_json({'error': '알 수 없는 경로입니다.'}, 404)
+        try:
+            self.read_request(head=True)
+        except db.DatabaseUnavailable:
+            self.send_json({'error': '데이터베이스에 연결할 수 없습니다.'}, 503)
+
+    def read_request(self, *, head=False):
+        if self.path == '/healthz':
+            if db.postgres_enabled():
+                with db.get_connection(db.DB_PATH) as conn:
+                    if conn.execute('SELECT 1 FROM sqlite_import WHERE id=1').fetchone() is None:
+                        raise db.DatabaseUnavailable
+            return self.send_json({'status': 'ok'})
+        url = urllib.parse.urlsplit(self.path)
+        path = url.path
+        public_render = ON_RENDER and not EXPECTED_SIGNER
+        if public_render:
+            if path == '/':
+                return self.serve_static('/about.html', head=head)
+            if path in RENDER_PUBLIC_PATHS or STATIC_ALIASES.get(path, path) in INTRO_FILES:
+                return self.serve_static(path, head=head)
+        demo_api = path.startswith('/demo/api/')
+        if not (public_render and demo_api) and not self.authorize():
+            return
+        if demo_api:
+            status = urllib.parse.parse_qs(url.query).get('status', [None])[0]
+            payload = demo.read(path, status)
+            if payload is None:
+                return self.send_json({'error': '공개 체험 경로를 찾을 수 없습니다.'}, 404)
+            return self.send_json(payload)
+        if path in PUBLIC_ACCOUNT_FILES or path in {'/style.css', '/app.js'} or STATIC_ALIASES.get(path, path) in INTRO_FILES:
+            return self.serve_static(path, head=head)
+        admin_only = path in {'/admin', '/admin.html', '/admin.js', '/api/settings/status'}
+        if not self.require_member(path, admin=admin_only or path.startswith('/api/admin/')):
+            return
+        if head:
+            return self.serve_static(path, head=True)
+        try:
+            if path == '/api/account/me':
+                return self.send_json({'username': self.subject, 'admin': bool(self.member['admin']),
+                                       'remaining': accounts.remaining(self.member)})
+            if path == PREFERENCES_API:
+                user_id = self.member['id']
+                return self.send_json({'account_id': str(user_id), 'username': self.subject,
+                                       'admin': bool(self.member['admin']),
+                                       **accounts.get_preferences(user_id)})
+            if path.startswith('/api/admin/'):
+                query = urllib.parse.parse_qs(url.query)
+                raw_before = query.get('before', [''])[0]
+                before = int(raw_before) if raw_before.isascii() and raw_before.isdecimal() and len(raw_before) < 19 else 2**63 - 1
+                category = path.removeprefix('/api/admin/')
+                username = accounts.normalize(query.get('q', [''])[0])[:64]
+                if category == 'members':
+                    return self.send_json(accounts.members(username, before))
+                if category in {'login', 'ai', 'feature'}:
+                    return self.send_json(accounts.dashboard(category, before, username))
+                return self.send_json({'error': '알 수 없는 경로입니다.'}, 404)
+            if path.startswith('/api/'):
+                with self.member_workspace(path):
+                    self.route_get()
+            else:
+                self.serve_static(path)
+        except gemini.BridgeError as error:
+            self.send_json({'error': str(error)}, 502)
 
     def route_get(self):
         parsed_url = urllib.parse.urlparse(self.path)
@@ -153,18 +296,34 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
                 "signed_in_as": self.subject,
             })
 
-        # 2. 정적 HTML 파일 서빙
-        if path not in STATIC_PATHS:
+        self.serve_static(path)
+
+    def serve_static(self, path, *, head=False):
+        self.path = STATIC_ALIASES.get(path, path)
+        if self.path not in STATIC_PATHS:
             return self.send_json({'error': '알 수 없는 경로입니다.'}, 404)
-        self.path = '/index.html' if path == '/' else path
-        super().do_GET()
+        if head:
+            return super().do_HEAD()
+        return super().do_GET()
 
     # ==========================================================================
     # POST 요청 라우팅
     # ==========================================================================
     def do_POST(self):
+        try:
+            self.write_request()
+        except db.DatabaseUnavailable:
+            self.send_json({'error': '데이터베이스에 연결할 수 없습니다.'}, 503)
+
+    def write_request(self):
         if not self.authorize():
             return
+        path = urllib.parse.urlsplit(self.path).path
+        if path not in {'/api/account/signup', '/api/account/login'} and not self.require_member(
+                path, admin=path.startswith('/api/admin/') or path == '/api/settings/test'):
+            return
+        if path.startswith('/api/account/') and self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
+            return self.send_json({'error': 'JSON 본문이 필요합니다.'}, 400)
         origin = self.headers.get('Origin')
         expected = PUBLIC_ORIGIN or f"http://{self.headers.get('Host')}"
         fetch_site = self.headers.get('Sec-Fetch-Site')
@@ -177,12 +336,70 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             return self.send_json({'error': '요청 본문이 너무 큽니다.'}, 413)
         except (ValueError, RecursionError, OSError):
             return self.send_json({'error': '유효한 JSON 객체를 보내세요.'}, 400)
-        try:
-            self.route_post(body)
-        except gemini.BridgeError as error:
-            self.send_json({'error': str(error)}, 502)
-        except (TypeError, AttributeError, ValueError):
-            self.send_json({'error': '요청 항목 형식이 올바르지 않습니다.'}, 400)
+        if path == '/api/account/signup':
+            try:
+                accounts.create_user(body.get('username'), body.get('password'))
+            except ValueError as error:
+                return self.send_json({'error': str(error)}, 400)
+            return self.send_json({'success': True}, 201)
+        if path == '/api/account/login':
+            token = accounts.login(body.get('username'), body.get('password'))
+            if not token:
+                return self.send_json({'error': '아이디 또는 비밀번호를 확인하세요.'}, 401)
+            accounts.logout(self.session_token())
+            return self.send_json({'success': True}, headers=(self.session_cookie(token, accounts.SESSION_SECONDS),))
+        if path == '/api/account/logout':
+            accounts.logout(self.session_token())
+            return self.send_json({'success': True}, headers=(self.session_cookie('', 0),))
+        if path in {'/api/account/password', '/api/account/delete'}:
+            user_id = self.member['id']
+            if body.get('account_id') != str(user_id):
+                return self.send_json({'error': '현재 로그인 계정의 설정을 다시 불러오세요.'}, 409)
+            delete = path == '/api/account/delete'
+            if delete and body.get('confirmed') is not True:
+                return self.send_json({'error': '계정 탈퇴 확인란을 선택하세요.'}, 400)
+            try:
+                accounts.change_account(user_id, self.session_token(), body.get('current_password'),
+                                        new_password=body.get('new_password'), delete=delete)
+            except accounts.SessionExpired:
+                return self.send_json({'error': '로그인이 필요합니다.'}, 401)
+            except accounts.LastAdministrator:
+                return self.send_json({'error': '마지막 관리자 계정은 탈퇴할 수 없습니다.'}, 409)
+            except ValueError as error:
+                return self.send_json({'error': str(error)}, 400)
+            return self.send_json({'success': True}, headers=(self.session_cookie('', 0),))
+        if path == PREFERENCES_API:
+            user_id = self.member['id']
+            # The browser's account ID is a stale-form check. Ownership comes from the session.
+            if body.get('account_id') != str(user_id):
+                return self.send_json({'error': '현재 로그인 계정의 설정을 다시 불러오세요.'}, 409)
+            try:
+                preferences = accounts.save_preferences(user_id, self.session_token(), body)
+            except ValueError as error:
+                return self.send_json({'error': str(error)}, 400)
+            if preferences is None:
+                return self.send_json({'error': '로그인이 필요합니다.'}, 401)
+            return self.send_json({'account_id': str(user_id), 'username': self.subject, **preferences})
+        if path == '/api/admin/whitelist':
+            user_id, enabled = body.get('user_id'), body.get('enabled')
+            if type(user_id) is not int or not 0 < user_id < 2**63 or type(enabled) is not bool:
+                return self.send_json({'error': '계정 ID와 화이트리스트 상태를 확인하세요.'}, 400)
+            if not accounts.whitelist(user_id, enabled, self.subject):
+                return self.send_json({'error': '회원 계정을 찾을 수 없습니다.'}, 404)
+            return self.send_json({'success': True})
+        if not path.startswith('/api/'):
+            return self.send_json({'error': '알 수 없는 API 경로입니다.'}, 404)
+        with self.member_workspace(path):
+            try:
+                self.route_post(body)
+            except accounts.QuotaExceeded:
+                self.send_json({'error': '오늘의 AI 생성 한도 3회를 모두 사용했습니다. 한국 시간 자정에 초기화됩니다.'}, 429)
+            except accounts.SessionExpired:
+                self.send_json({'error': '로그인이 필요합니다.'}, 401)
+            except gemini.BridgeError as error:
+                self.send_json({'error': str(error)}, 502)
+            except (TypeError, AttributeError, ValueError):
+                self.send_json({'error': '요청 항목 형식이 올바르지 않습니다.'}, 400)
 
     def route_post(self, body):
         path = urllib.parse.urlparse(self.path).path
@@ -193,11 +410,7 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             if not raw_text:
                 return self.send_json({"error": "업무 원문 텍스트가 비어 있습니다."}, 400)
             
-            classified = gemini.classify_raw_work_log(raw_text)
-            # 누락 정보 사전 탐지
-            missing_issues = gemini.detect_missing_information(classified)
-            classified['missing_alerts'] = missing_issues
-            return self.send_json(classified)
+            return self.send_json(gemini.classify_raw_work_log(raw_text))
 
         # 업무 기록 정식 저장
         elif path == '/api/logs/create':
@@ -395,9 +608,17 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "알 수 없는 API 경로입니다."}, 404)
 
 def run():
-    if HOST != '127.0.0.1' and (not EXPECTED_SIGNER or not PUBLIC_ORIGIN or not PUBLIC_ORIGIN.startswith('https://')):
-        sys.exit('External binding requires ALB authentication and a configured HTTPS origin.')
+    if HOST != '127.0.0.1':
+        basic_auth = bool(WEB_USER and WEB_CREDENTIAL)
+        if (EXPECTED_SIGNER and basic_auth) or not (EXPECTED_SIGNER or basic_auth or ON_RENDER) or not PUBLIC_ORIGIN or not PUBLIC_ORIGIN.startswith('https://'):
+            sys.exit('External binding requires a configured HTTPS origin and at most one proxy authentication method.')
     db.init_db()
+    accounts.init()
+    bootstrap_password = os.environ.pop('SHIFT_BRIDGE_ADMIN_PASSWORD', '')
+    sync_password = os.environ.pop('SHIFT_BRIDGE_ADMIN_SYNC_PASSWORD', '') == '1'
+    if bootstrap_password and not db.postgres_enabled():
+        accounts.bootstrap_admin(os.getenv('SHIFT_BRIDGE_ADMIN_USER', 'admin'), bootstrap_password,
+                                 update_password=ON_RENDER and sync_password)
     ThreadingTCPServer.allow_reuse_address = True
     server_address = (HOST, PORT)
     try:

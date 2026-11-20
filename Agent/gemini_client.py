@@ -13,6 +13,10 @@ import json
 import time
 import urllib.request
 from urllib.error import HTTPError
+from contextlib import nullcontext
+from contextvars import ContextVar
+
+generation_tracker = ContextVar("generation_tracker", default=nullcontext)
 
 class BridgeError(Exception):
     pass
@@ -44,6 +48,8 @@ def get_bridge_health():
 
 
 def call_gemini_raw(payload):
+    if not os.environ.get("SHIFT_BRIDGE_ENGINE_URL") or not os.environ.get("HYBRID_API_AUTH_TOKEN"):
+        raise BridgeError("BridgeCLI 연결 설정을 확인하세요.")
     request = urllib.request.Request(
         os.environ["SHIFT_BRIDGE_ENGINE_URL"] + "/v1/web/generate",
         data=json.dumps(payload).encode("utf-8"),
@@ -53,7 +59,8 @@ def call_gemini_raw(payload):
         },
     )
     try:
-        return bridge_opener.open(request, timeout=120)
+        with generation_tracker.get()():
+            return bridge_opener.open(request, timeout=120)
     except HTTPError as error:
         with error:
             message = "AI 요청이 많습니다. 잠시 후 다시 시도하세요." if error.code == 429 else "BridgeCLI 또는 Gemini 요청에 실패했습니다."
@@ -116,7 +123,7 @@ def generate_text(system_instruction, user_content, temperature=0.2, json_mode=F
 
 CLASSIFY_PROMPT = """
 당신은 AWS DCO(Data Center Operations) 수석 엔지니어 업무 분석 AI입니다.
-직원이 비정형으로 작성한 업무 일지나 음성 텍스트를 정밀 분석하여 다음 11개 필드를 가진 JSON 객체로 분류하십시오.
+직원이 비정형으로 작성한 업무 일지나 음성 텍스트를 정밀 분석하여 다음 11개 분류 필드와 missing_alerts를 가진 JSON 객체를 반환하십시오.
 
 [분류 대상 11개 필드]
 1. execution_time: 업무 수행 시간 (예: "04:20", 확인 불가능 시 반드시 "미확인")
@@ -131,6 +138,14 @@ CLASSIFY_PROMPT = """
 10. follow_up: 후속 작업 (다음 근무자가 해야 할 일, 확인 불가능 시 반드시 "미확인")
 11. remarks: 특이사항 (주의점, 추가 환경 정보 등, 확인 불가능 시 반드시 "미확인")
 
+[검사 기준]
+- 장비 식별번호(서버, 랙, 스위치 등)가 누락되었거나 '미확인'인가?
+- 작업 티켓 번호(TT-xxxxx)가 등록되지 않았는가?
+- 부품 교체 후 정상 작동 여부(POST, LED, OS 인식) 확인 결과가 빠져 있는가?
+- 후속 전달 작업이나 다음 조 인계 사항이 불명확한가?
+- 원인과 조치 내역 간의 기술적 모순이나 전후 불일치가 있는가?
+- 위 기준의 문제마다 field(분류 필드명), issue(문제 설명), question(보완 질문)을 가진 객체를 missing_alerts 배열에 넣으십시오. 문제가 없으면 빈 배열을 사용하십시오.
+
 [엄격한 제약사항 - 절대 준수]
 - 원문에 명시되지 않거나 확인되지 않은 정보는 절대로 상상하거나 임의로 생성(환각)하지 말고 반드시 "미확인"으로 표기하십시오.
 - JSON 키 이름은 위의 영문 명칭과 완벽히 일치해야 합니다.
@@ -142,6 +157,11 @@ def classify_raw_work_log(raw_text):
     try:
         data = json.loads(raw_response)
         data['raw_text'] = raw_text
+        alerts = data.get('missing_alerts')
+        data['missing_alerts'] = [
+            alert for alert in alerts
+            if isinstance(alert, dict) and all(isinstance(alert.get(key), str) for key in ('field', 'issue', 'question'))
+        ] if isinstance(alerts, list) else []
         return data
     except Exception:
         # JSON 파싱 실패 시 안전한 기본값
@@ -157,7 +177,8 @@ def classify_raw_work_log(raw_text):
             "result": "미확인",
             "status": "미완료",
             "follow_up": "미확인",
-            "remarks": "미확인"
+            "remarks": "미확인",
+            "missing_alerts": []
         }
 
 # ==============================================================================
@@ -212,46 +233,6 @@ def generate_handover_report_content(work_logs):
     ])
     user_prompt = f"다음 업무 기록을 종합하여 8개 섹션 인수인계 보고서를 작성해 주세요:\n\n{logs_summary}"
     return generate_text(REPORT_PROMPT, user_prompt, temperature=0.2)
-
-# ==============================================================================
-# 3. 누락 정보 탐지 및 대화형 추가 입력 유도 (Quality QA)
-# ==============================================================================
-
-DETECT_MISSING_PROMPT = """
-당신은 AWS DCO 업무 기록 품질 검사관 AI입니다.
-업무 기록의 완성도를 점검하고 누락된 정보나 불일치 문제를 찾아내어 질문 리스트를 JSON 배열로 작성하십시오.
-
-[검사 기준]
-- 장비 식별번호(서버, 랙, 스위치 등)가 누락되었거나 '미확인'인가?
-- 작업 티켓 번호(TT-xxxxx)가 등록되지 않았는가?
-- 부품 교체 후 정상 작동 여부(POST, LED, OS 인식) 확인 결과가 빠져 있는가?
-- 후속 전달 작업이나 다음 조 인계 사항이 불명확한가?
-- 원인과 조치 내역 간의 기술적 모순이나 전후 불일치가 있는가?
-
-[출력 형식 JSON]
-[
-  {
-    "field": "device_id",
-    "issue": "서버 및 랙 번호가 누락되었습니다.",
-    "question": "해당 작업이 진행된 서버의 랙 번호(Rack ID)와 호스트명을 알려주시겠습니까?"
-  },
-  {
-    "field": "result",
-    "issue": "부품 교체 후 정상 작동 확인 내역이 누락되었습니다.",
-    "question": "부품 교체 후 iDRAC 또는 OS 상에서 정상 인식이 확인되었습니까?"
-  }
-]
-누락이나 문제가 없으면 빈 배열 []을 반환하십시오.
-"""
-
-def detect_missing_information(log_data):
-    """기록 내 누락 정보 탐지 및 엔지니어 질문 생성"""
-    context = json.dumps(log_data, ensure_ascii=False, indent=2)
-    res = generate_text(DETECT_MISSING_PROMPT, context, temperature=0.1, json_mode=True)
-    try:
-        return json.loads(res)
-    except Exception:
-        return []
 
 # ==============================================================================
 # 4. 음성 인식 텍스트 정제 & Multimodal 오디오 파일 분석 (Voice Ops)

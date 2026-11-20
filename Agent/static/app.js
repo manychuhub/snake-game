@@ -10,11 +10,80 @@ let currentReportMarkdown = "";
 let isReportEditMode = false;
 let speechRecognitionInstance = null;
 let isRecording = false;
+const demoMode = ["/demo", "/demo/"].includes(window.location.pathname);
+
+function requestApi(path, options) {
+    if (!demoMode) {
+        return fetch(path, options).then(response => {
+            if (response.status === 401) location.replace("/login");
+            if (options?.method === "POST") refreshAccount().catch(console.error);
+            return response;
+        });
+    }
+    if ((options?.method || "GET") !== "GET") {
+        return Promise.reject(new Error("가상 기록을 보는 공개 체험입니다."));
+    }
+    return fetch(`/demo${path}`);
+}
+
+async function refreshAccount() {
+    const response = await fetch("/api/account/me");
+    if (response.status === 401) {
+        location.replace("/login");
+        return;
+    }
+    if (!response.ok) return;
+    const account = await response.json();
+    document.getElementById("activeOperatorName").textContent = account.username;
+    for (const id of ["reportAuthor", "approverNameInput"]) {
+        const field = document.getElementById(id);
+        field.value = account.username;
+        field.readOnly = true;
+    }
+    document.getElementById("aiQuota").textContent = account.remaining === null
+        ? "AI 생성 한도 면제" : `오늘 AI 생성 ${account.remaining}/3회 남음`;
+    document.getElementById("adminLink").hidden = !account.admin;
+    document.getElementById("preferencesLink").hidden = false;
+    document.getElementById("engineButton").hidden = !account.admin;
+}
 
 // 페이지 초기화
 document.addEventListener("DOMContentLoaded", () => {
+    if (demoMode) {
+        document.body.classList.add("demo-mode");
+        document.getElementById("demo-notice").hidden = false;
+        document.getElementById("demo-login").hidden = false;
+        document.getElementById("activeOperatorName").textContent = "예시 당직자";
+        document.getElementById("site-region").textContent = "가상 환경";
+        document.getElementById("site-datacenter").textContent = "예시 데이터센터";
+        for (const id of ["operatorNameInput", "reportAuthor", "approverNameInput"]) {
+            document.getElementById(id).value = "예시 당직자";
+        }
+        for (const field of document.querySelectorAll("main input, main textarea, main select")) {
+            if (field.type === "file" || field.tagName === "SELECT") field.disabled = true;
+            else field.readOnly = true;
+        }
+        for (const control of document.querySelectorAll("main button:not(.btn-filter)")) control.disabled = true;
+        for (const zone of document.querySelectorAll(".upload-zone, #micBtn")) zone.inert = true;
+    } else {
+        const authChanges = new BroadcastChannel("shift-bridge-auth");
+        authChanges.addEventListener("message", () => {
+            document.body.style.visibility = "hidden";
+            location.replace("/workspace");
+        });
+        refreshAccount().catch(console.error);
+        document.getElementById("logoutButton").hidden = false;
+        document.getElementById("logoutButton").addEventListener("click", async () => {
+            const response = await fetch("/api/account/logout", {
+                method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"
+            });
+            if (response.ok || response.status === 401) {
+                authChanges.postMessage("changed");
+                location.replace("/login");
+            }
+        });
+    }
     loadWorkLogs();
-    checkApiKeyStatus();
     loadTechnicalDocs();
     loadAnomalyStatistics();
     loadHandoverReports();
@@ -84,7 +153,7 @@ async function analyzeAndClassifyLog() {
     statusBadge.className = "badge-status check";
 
     try {
-        const res = await fetch("/api/logs/classify", {
+        const res = await requestApi("/api/logs/classify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ raw_text: rawText, operator: operator })
@@ -180,7 +249,7 @@ async function saveClassifiedLog() {
     btn.disabled = true;
 
     try {
-        const res = await fetch("/api/logs/create", {
+        const res = await requestApi("/api/logs/create", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(currentClassifiedData)
@@ -206,9 +275,15 @@ async function loadWorkLogs(statusFilter = null) {
     try {
         let url = "/api/logs";
         if (statusFilter) url += `?status=${encodeURIComponent(statusFilter)}`;
-        const res = await fetch(url);
+        const res = await requestApi(url);
         const data = await res.json();
         const logs = data.logs || [];
+
+        if (demoMode && !statusFilter && logs.length) {
+            document.getElementById("rawLogInput").value = logs[0].raw_text;
+            document.getElementById("classifyStatusBadge").textContent = "가상 분류 결과";
+            renderClassifiedPreview(logs[0]);
+        }
 
         if (logs.length === 0) {
             tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 25px; color: var(--text-muted);">등록된 업무 기록이 없습니다.</td></tr>`;
@@ -241,7 +316,7 @@ async function loadWorkLogs(statusFilter = null) {
             `;
         }).join("");
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="10" style="color: #f87171; text-align: center;">로딩 실패: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="color: #f87171; text-align: center;">로딩 실패: ${escapeHtml(e.message)}</td></tr>`;
     }
 }
 
@@ -254,7 +329,7 @@ function filterLogs(status, btnElement) {
 async function deleteLog(id) {
     if (!confirm(`업무 기록 #${id}을 삭제하시겠습니까?`)) return;
     try {
-        const res = await fetch("/api/logs/delete", {
+        const res = await requestApi("/api/logs/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: id })
@@ -346,7 +421,7 @@ function stopSpeechRecording() {
 async function triggerVoiceCleaning(rawTranscript) {
     if (!rawTranscript.trim()) return;
     try {
-        const res = await fetch("/api/voice/process", {
+        const res = await requestApi("/api/voice/process", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ transcript: rawTranscript })
@@ -375,7 +450,7 @@ async function handleAudioFileUpload(event) {
             const base64Data = reader.result.split(",")[1];
             const mimeType = file.type || "audio/wav";
 
-            const res = await fetch("/api/voice/upload", {
+            const res = await requestApi("/api/voice/upload", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ audio_base64: base64Data, mime_type: mimeType })
@@ -391,7 +466,7 @@ async function handleAudioFileUpload(event) {
 
             statusEl.innerHTML = `<span style="color: #10b981;">✅ '${escapeHtml(file.name)}' 음성 처리 완료!</span>`;
         } catch (e) {
-            statusEl.innerHTML = `<span style="color: #f87171;">음성 처리 실패: ${e.message}</span>`;
+            statusEl.innerHTML = `<span style="color: #f87171;">음성 처리 실패: ${escapeHtml(e.message)}</span>`;
         }
     };
     reader.readAsDataURL(file);
@@ -408,7 +483,7 @@ function transferVoiceToLog() {
     }
 
     document.getElementById("rawLogInput").value = textToTransfer;
-    switchTab("tab-classify", document.querySelectorAll(".nav-tab")[0]);
+    switchTab("tab-classify", document.querySelector('[aria-controls="tab-classify"]'));
     analyzeAndClassifyLog();
 }
 
@@ -435,7 +510,7 @@ async function generateComprehensiveReport() {
     view.innerHTML = `<div style="text-align: center; padding: 50px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><p style="margin-top: 15px;">전체 업무 기록을 집계하여 8개 섹션 보고서를 생성하고 있습니다...</p></div>`;
 
     try {
-        const res = await fetch("/api/reports/generate", {
+        const res = await requestApi("/api/reports/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -461,7 +536,7 @@ async function generateComprehensiveReport() {
 
         loadHandoverReports();
     } catch (e) {
-        view.innerHTML = `<div style="color: #f87171; padding: 20px;">생성 실패: ${e.message}</div>`;
+        view.innerHTML = `<div style="color: #f87171; padding: 20px;">생성 실패: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -496,7 +571,7 @@ async function approveCurrentReport() {
     if (!confirm(`인수인계 보고서 #${currentReportId}의 내용을 공식 검토 완료하였으며, 최종 서명 승인하시겠습니까?`)) return;
 
     try {
-        const res = await fetch("/api/reports/approve", {
+        const res = await requestApi("/api/reports/approve", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -522,7 +597,7 @@ async function approveCurrentReport() {
 async function loadHandoverReports() {
     const container = document.getElementById("reportArchiveTbody");
     try {
-        const res = await fetch("/api/reports");
+        const res = await requestApi("/api/reports");
         const data = await res.json();
         const reports = data.reports || [];
 
@@ -542,16 +617,20 @@ async function loadHandoverReports() {
                 </div>
             </div>
         `).join("");
+        if (demoMode && currentReportId === null) await loadReportDetail(reports[0].id, reports[0]);
     } catch (e) {
         container.innerHTML = `<div style="color: #f87171;">목록 로드 실패</div>`;
     }
 }
 
-async function loadReportDetail(id) {
+async function loadReportDetail(id, selectedReport = null) {
     try {
-        const res = await fetch("/api/reports");
-        const data = await res.json();
-        const rep = (data.reports || []).find(r => r.id === id);
+        if (!selectedReport) {
+            const res = await requestApi("/api/reports");
+            const data = await res.json();
+            selectedReport = (data.reports || []).find(report => report.id === id);
+        }
+        const rep = selectedReport;
         if (!rep) return;
 
         currentReportId = rep.id;
@@ -588,7 +667,7 @@ async function executeRagQuery() {
     sourcesList.innerHTML = "";
 
     try {
-        const res = await fetch("/api/rag/query", {
+        const res = await requestApi("/api/rag/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ question: q })
@@ -621,7 +700,7 @@ async function executeRagQuery() {
             }).join("");
         }
     } catch (e) {
-        answerText.innerHTML = `<span style="color: #f87171;">검색 오류: ${e.message}</span>`;
+        answerText.innerHTML = `<span style="color: #f87171;">검색 오류: ${escapeHtml(e.message)}</span>`;
     }
 }
 
@@ -651,7 +730,7 @@ async function uploadAndAnalyzeDocument() {
     }
 
     try {
-        const res = await fetch("/api/docs/upload", {
+        const res = await requestApi("/api/docs/upload", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ filename: filename, content: content })
@@ -673,7 +752,7 @@ async function loadTechnicalDocs() {
     const selectForQa = document.getElementById("docSelectForQa");
 
     try {
-        const res = await fetch("/api/docs");
+        const res = await requestApi("/api/docs");
         const data = await res.json();
         const docs = data.docs || [];
 
@@ -716,7 +795,7 @@ async function executeDocQa() {
     resBox.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 문서 본문을 검토하여 출처와 함께 답변을 생성 중입니다...`;
 
     try {
-        const res = await fetch("/api/docs/qa", {
+        const res = await requestApi("/api/docs/qa", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ doc_id: parseInt(docId), question: q })
@@ -726,7 +805,7 @@ async function executeDocQa() {
 
         renderMarkdownInto(data.answer, resBox);
     } catch (e) {
-        resBox.innerHTML = `<span style="color: #f87171;">오류: ${e.message}</span>`;
+        resBox.innerHTML = `<span style="color: #f87171;">오류: ${escapeHtml(e.message)}</span>`;
     }
 }
 
@@ -736,7 +815,7 @@ async function executeDocQa() {
 
 async function loadAnomalyStatistics() {
     try {
-        const res = await fetch("/api/anomalies/stats");
+        const res = await requestApi("/api/anomalies/stats");
         const stats = await res.json();
 
         document.getElementById("stat-total-logs").textContent = stats.total_logs || 0;
@@ -798,11 +877,11 @@ async function requestAnomalyExplanation() {
     box.innerHTML = `<div style="text-align: center; padding: 25px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><p style="margin-top: 10px;">통계 데이터를 바탕으로 Gemini 수석 아키텍트가 공학적 원인 진단을 수행 중입니다...</p></div>`;
 
     try {
-        const res = await fetch("/api/anomalies/explain", { method: "POST" });
+        const res = await requestApi("/api/anomalies/explain", { method: "POST" });
         const data = await res.json();
         renderMarkdownInto(data.explanation || "분석 결과를 생성하지 못했습니다.", box);
     } catch (e) {
-        box.innerHTML = `<div style="color: #f87171;">해석 실패: ${e.message}</div>`;
+        box.innerHTML = `<div style="color: #f87171;">해석 실패: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -813,7 +892,7 @@ async function requestAnomalyExplanation() {
 async function loadPriorityTasks() {
     const tbody = document.getElementById("priorityTasksTbody");
     try {
-        const res = await fetch("/api/logs?status=미완료");
+        const res = await requestApi("/api/logs?status=미완료");
         const data = await res.json();
         const tasks = data.logs || [];
 
@@ -851,7 +930,7 @@ async function loadPriorityTasks() {
 async function markTaskDone(id) {
     if (!confirm(`업무 #${id}의 조치를 완료 상태로 확정 변경하시겠습니까?`)) return;
     try {
-        await fetch("/api/logs/update", {
+        await requestApi("/api/logs/update", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: id, status: "완료", result: "현장 점검 및 조치 완료 확인" })
@@ -878,7 +957,7 @@ async function executeTranslation() {
     resBox.innerHTML = `<div style="text-align: center; padding: 40px;"><i class="fa-solid fa-spinner fa-spin"></i> 전문 용어(iDRAC, PDU, 랙, 티켓)를 보호하며 정밀 번역 중입니다...</div>`;
 
     try {
-        const res = await fetch("/api/translate", {
+        const res = await requestApi("/api/translate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: text, target_lang: lang })
@@ -886,7 +965,7 @@ async function executeTranslation() {
         const data = await res.json();
         resBox.textContent = data.translated_text || "번역 결과를 가져올 수 없습니다.";
     } catch (e) {
-        resBox.innerHTML = `<span style="color: #f87171;">번역 실패: ${e.message}</span>`;
+        resBox.innerHTML = `<span style="color: #f87171;">번역 실패: ${escapeHtml(e.message)}</span>`;
     }
 }
 
@@ -922,7 +1001,7 @@ async function sendAgentMessage() {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 
     try {
-        const res = await fetch("/api/agent/command", {
+        const res = await requestApi("/api/agent/command", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ command: cmd })
@@ -952,7 +1031,7 @@ async function sendAgentMessage() {
 
         aiBubble.innerHTML = contentHtml;
     } catch (e) {
-        aiBubble.innerHTML = `<span style="color: #f87171;">오류: ${e.message}</span>`;
+        aiBubble.innerHTML = `<span style="color: #f87171;">오류: ${escapeHtml(e.message)}</span>`;
     } finally {
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
@@ -965,11 +1044,12 @@ async function sendAgentMessage() {
 async function loadEfficiencyImprovements() {
     const container = document.getElementById("improvementsContainer");
     try {
-        const res = await fetch("/api/improvements", { method: "POST" });
+        const res = await requestApi("/api/improvements", { method: "POST" });
         const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
         renderMarkdownInto(data.improvements || "개선안을 불러오지 못했습니다.", container);
     } catch (e) {
-        container.innerHTML = `<div style="color: #f87171;">개선안 로드 오류: ${e.message}</div>`;
+        container.innerHTML = `<div style="color: #f87171;">개선안 로드 오류: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -979,6 +1059,7 @@ async function loadEfficiencyImprovements() {
 
 function openApiKeyModal() {
     document.getElementById("apiKeyModal").style.display = "flex";
+    checkApiKeyStatus();
 }
 
 function closeApiKeyModal() {
@@ -987,7 +1068,7 @@ function closeApiKeyModal() {
 
 async function checkApiKeyStatus() {
     try {
-        const res = await fetch("/api/settings/status");
+        const res = await requestApi("/api/settings/status");
         const data = await res.json();
         const statusSpan = document.getElementById("apiKeyStatusText");
         if (data.signed_in_as) {
@@ -1013,7 +1094,7 @@ async function testApiKeyConnection() {
     resultBox.style.display = "none";
 
     try {
-        const res = await fetch("/api/settings/test", {
+        const res = await requestApi("/api/settings/test", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: "{}"
@@ -1031,7 +1112,7 @@ async function testApiKeyConnection() {
     } catch (e) {
         resultBox.style.display = "block";
         resultBox.className = "test-result-box fail";
-        resultBox.innerHTML = `<strong><i class="fa-solid fa-circle-xmark"></i> 통신 오류:</strong> ${e.message}`;
+        resultBox.innerHTML = `<strong><i class="fa-solid fa-circle-xmark"></i> 통신 오류:</strong> ${escapeHtml(e.message)}`;
     } finally {
         btn.disabled = false;
         btn.innerHTML = `<i class="fa-solid fa-network-wired"></i> 연결 테스트`;

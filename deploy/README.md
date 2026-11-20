@@ -35,3 +35,11 @@ Gemini 키는 AWS Secrets Manager에 두고 EC2 역할이 해당 시크릿만 �
 Gemini는 AWS 밖의 Google API입니다. 파일럿은 가상 데이터로 검증하고, 실제 티켓·장비 식별자·로그·문서·음성의 사용 여부는 조직의 데이터 반출 및 서비스 승인 범위를 따릅니다. 브라우저 음성 인식은 AWS HTTPS 배포에서 비활성화되어 있으며, 오디오 업로드 분석은 설정한 Gemini를 사용합니다.
 
 보고서는 교대 기간에 등록된 업무와 그 전에 등록되어 아직 완료되지 않은 업무를 포함합니다. 시작과 종료에는 브라우저의 현지 시각을 사용하며 서버는 UTC로 조회합니다. 파일럿에서 보고서당 최대 50건을 처리합니다. 웹과 기존 CLI의 업무 DB는 별개입니다. 이 스택에는 Amazon 내부 티켓·알림·운영 시스템 연결이 들어 있지 않습니다.
+
+## 앱 관리자 계정
+
+AWS에서는 Cognito 인증 후 앱 계정으로 로그인합니다. 배포 후 EC2의 관리 세션에서 아래 명령의 컨테이너 이름을 현재 실행 중인 컨테이너 이름으로 바꿔 실행하고, 프롬프트에 관리자 비밀번호를 입력합니다.
+
+```sh
+docker exec -it --user 10001:10001 -e SHIFT_BRIDGE_DB_PATH=/data/web/shift_bridge.db <container> python /app/Agent/accounts.py admin
+```
