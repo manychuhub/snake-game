@@ -87,7 +87,7 @@ def main():
         processes.append(subprocess.Popen(
             [sys.executable, '-m', 'uvicorn', 'api_server:app', '--host', '127.0.0.1',
              '--port', engine_port, '--no-access-log'], cwd='/app/BridgeCLI', env=engine_env,
-            user=10002, group=10002, extra_groups=[1000],
+            user=10002, group=10002, extra_groups=[],
         ))
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         deadline = time.monotonic() + 20
@@ -103,7 +103,7 @@ def main():
         else:
             raise RuntimeError('BridgeCLI did not start.')
         processes.append(subprocess.Popen([sys.executable, 'app.py'], cwd='/app/Agent', env=web_env,
-                                          user=10001, group=10001, extra_groups=[1000]))
+                                          user=10001, group=10001, extra_groups=[]))
         while all(process.poll() is None for process in processes):
             time.sleep(0.5)
         return 1
