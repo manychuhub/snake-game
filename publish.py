@@ -37,7 +37,7 @@ PATHS = (
     'BridgeCLI/bridge.bat', 'BridgeCLI/start.bat', 'BridgeCLI/stop.bat',
     'BridgeCLI/test.bat', 'BridgeCLI/tests/test_bridge.py',
     'deploy/README.md', 'deploy/RENDER.md', 'deploy/aws.yml', 'deploy/run.py',
-    'deploy/sqlite_backup.py', 'deploy/import_sqlite.py', 'deploy/test_postgres_migration.py',
+    'deploy/sqlite_backup.py', 'deploy/import_sqlite.py', 'deploy/test_postgres_migration.py', 'deploy/test_render_tls.py',
     'supabase/migrations/20261120000100_shift_bridge_storage.sql',
     'supabase/migrations/20261123000100_ai_confirmations.sql',
     'supabase/migrations/20261123000200_ai_notifications.sql',

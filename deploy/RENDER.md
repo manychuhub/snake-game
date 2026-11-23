@@ -36,6 +36,12 @@
 
 ## Supabase로 이전하기
 
+### PostgreSQL CA 파일 오류 복구
+
+`SSL_CA_FILE_ERROR`는 인증서 파일 경로나 읽기 권한 문제입니다. 컨테이너 시작 프로세스가 CA를 읽고 검증한 뒤 웹 사용자(10001)와 BridgeCLI 사용자(10002)가 읽을 수 있는 임시 공개 인증서 파일로 복사합니다. DSN의 `sslrootcert` 또는 `PGSSLROOTCERT` 경로가 이 복사본으로 연결됩니다. CA 경로가 생략된 연결은 시스템 인증서 저장소를 사용하며 `sslmode=verify-full`을 유지합니다.
+
+Render **Environment → Secret Files**에 데이터베이스 프로젝트에서 받은 CA를 `supabase-ca.crt`로 올리면 `/etc/secrets/supabase-ca.crt`를 자동으로 사용합니다. 파일을 대신해 **Environment**의 `SHIFT_BRIDGE_POSTGRES_CA_PEM`에 PEM 인증서 내용을 입력해도 됩니다. 연결 문자열에 다른 CA 경로를 지정했다면 그 경로에 파일을 제공하거나 `sslrootcert=/etc/secrets/supabase-ca.crt`로 맞춥니다. 설정을 저장한 뒤 **Manual Deploy → Deploy latest commit**으로 최신 `shift-bridge` 커밋을 배포합니다.
+
 1. 원본 파일에 접근할 수 있는 환경에서 아래 명령으로 복사합니다. Windows에서는 경로를 해당 복사본의 실제 위치로 바꿉니다. SQLite Backup API로 파일마다 일관된 복사본을 만들고 무결성과 SHA-256을 검증합니다. 파일 간 시점을 맞추려면 승인된 쓰기 중지 상태에서 최종 백업을 생성합니다. 백업에는 비밀번호 해시와 업무 데이터가 포함되므로 비공개 저장소에 보관합니다.
 
    ```bash
