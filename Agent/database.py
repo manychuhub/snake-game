@@ -3,7 +3,7 @@
 """
 SHIFT BRIDGE - AWS DCO AI 업무 인수인계 시스템
 [Database & Knowledge Storage Module]
-- SQLite3 기반 Zero-dependency 데이터베이스
+- SQLite 및 PostgreSQL 지원
 - FTS(Full-Text Search) 및 하이브리드 RAG 검색 지원
 - 업무 기록, 보고서, 누락 질의, 기술 문서, 감사 이력 관리
 """
@@ -13,19 +13,88 @@ import json
 import time
 import datetime
 from contextlib import contextmanager, closing
+from contextvars import ContextVar
 from pathlib import Path
 
 DB_PATH = Path(os.getenv("SHIFT_BRIDGE_DB_PATH", Path(__file__).resolve().parent / "shift_bridge.db"))
 
+workspace_db = ContextVar('workspace_db', default=None)
+workspace_id = ContextVar('workspace_id', default=0)
+EDITABLE_LOG_FIELDS = frozenset((
+    'raw_text', 'execution_time', 'operator', 'device_id', 'ticket_no', 'incident_type', 'cause',
+    'action_taken', 'result', 'status', 'follow_up', 'remarks', 'audio_source', 'missing_alerts',
+    'priority_score', 'priority_tier',
+))
+
+
+class DatabaseUnavailable(RuntimeError):
+    pass
+
+
+def postgres_enabled():
+    return bool(os.getenv('SHIFT_BRIDGE_DATABASE_URL'))
+
+
+def lock_accounts(conn):
+    if postgres_enabled():
+        conn.execute('SELECT pg_advisory_xact_lock(1098792714)')
+    else:
+        conn.execute('BEGIN IMMEDIATE')
+
+
 @contextmanager
-def get_connection():
-    with closing(sqlite3.connect(DB_PATH)) as conn:
+def get_connection(path=None, *, account_id=None):
+    if postgres_enabled():
+        import postgres_store
+        try:
+            with postgres_store.database(os.environ['SHIFT_BRIDGE_DATABASE_URL'],
+                                         workspace=workspace_id.get() if path is None else None,
+                                         account=account_id) as conn:
+                yield conn
+        except postgres_store.StorageError:
+            raise DatabaseUnavailable from None
+        return
+    with closing(sqlite3.connect(path or workspace_db.get() or DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         with conn:
             yield conn
 
-def init_db():
+def init_ai_confirmations(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_confirmations (
+            id TEXT PRIMARY KEY,
+            actor_id INTEGER NOT NULL,
+            log_id INTEGER NOT NULL,
+            ticket_no TEXT,
+            device_id TEXT,
+            expected_status TEXT,
+            new_status TEXT NOT NULL,
+            response TEXT
+        );
+    """)
+
+
+def init_dco_tables(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_tool_confirmations (
+            id TEXT PRIMARY KEY, actor_id INTEGER NOT NULL, tool TEXT NOT NULL, target_id TEXT,
+            payload TEXT NOT NULL, request_message TEXT NOT NULL, expires_at INTEGER NOT NULL,
+            response TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dco_work_requests (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL, item_id TEXT NOT NULL,
+            quantity INTEGER NOT NULL CHECK (quantity >= 0), details TEXT NOT NULL
+        )
+    """)
+    conn.execute('CREATE INDEX IF NOT EXISTS dco_work_requests_item ON dco_work_requests (kind, item_id)')
+
+
+def init_db(*, seed=True):
     """데이터베이스 스키마 초기화 및 샘플 데이터 시딩"""
+    if postgres_enabled():
+        return
     with get_connection() as conn:
         cursor = conn.cursor()
 
@@ -116,6 +185,9 @@ def init_db():
         );
         """)
 
+        init_ai_confirmations(conn)
+        init_dco_tables(conn)
+
         # 6. FTS(Full Text Search) 가상 테이블 생성 (RAG 고속 검색)
         cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS work_logs_fts USING fts5(
@@ -134,7 +206,7 @@ def init_db():
 
         # 샘플 AWS DCO 현장 데이터 시딩
         cursor.execute("SELECT COUNT(*) FROM work_logs;")
-        if cursor.fetchone()[0] == 0 and os.getenv("SHIFT_BRIDGE_SEED_DEMO", "1") == "1":
+        if seed and cursor.fetchone()[0] == 0 and os.getenv("SHIFT_BRIDGE_SEED_DEMO", "1") == "1":
             seed_sample_data(cursor)
 
         conn.commit()
@@ -232,35 +304,36 @@ def seed_sample_data(cursor):
 def add_work_log(log_data):
     """신규 업무 기록 추가 (FTS 동기화 자동)"""
     with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+        log_id = insert_work_log(conn, log_data)
+    record_audit(log_data.get('operator', '시스템'), 'ADD_LOG', f'ID #{log_id}', log_data.get('device_id', ''))
+    return log_id
+
+
+def insert_work_log(conn, log_data):
+    return conn.execute("""
         INSERT INTO work_logs (
             raw_text, execution_time, operator, device_id, ticket_no, incident_type,
             cause, action_taken, result, status, follow_up, remarks, audio_source,
             missing_alerts, priority_score, priority_tier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            log_data.get('raw_text', ''),
-            log_data.get('execution_time', '미확인'),
-            log_data.get('operator', '미확인'),
-            log_data.get('device_id', '미확인'),
-            log_data.get('ticket_no', '미확인'),
-            log_data.get('incident_type', '기타'),
-            log_data.get('cause', '미확인'),
-            log_data.get('action_taken', '미확인'),
-            log_data.get('result', '미확인'),
-            log_data.get('status', '미완료'),
-            log_data.get('follow_up', '미확인'),
-            log_data.get('remarks', '미확인'),
-            log_data.get('audio_source', ''),
-            json.dumps(log_data.get('missing_alerts', []), ensure_ascii=False),
-            log_data.get('priority_score', 50),
-            log_data.get('priority_tier', 'P3')
-        ))
-        conn.commit()
-        log_id = cursor.lastrowid
-        record_audit(log_data.get('operator', '시스템'), "ADD_LOG", f"ID #{log_id}", log_data.get('device_id', ''))
-        return log_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    """, (
+        log_data.get('raw_text', ''),
+        log_data.get('execution_time', '미확인'),
+        log_data.get('operator', '미확인'),
+        log_data.get('device_id', '미확인'),
+        log_data.get('ticket_no', '미확인'),
+        log_data.get('incident_type', '기타'),
+        log_data.get('cause', '미확인'),
+        log_data.get('action_taken', '미확인'),
+        log_data.get('result', '미확인'),
+        log_data.get('status', '미완료'),
+        log_data.get('follow_up', '미확인'),
+        log_data.get('remarks', '미확인'),
+        log_data.get('audio_source', ''),
+        json.dumps(log_data.get('missing_alerts', []), ensure_ascii=False),
+        log_data.get('priority_score', 50),
+        log_data.get('priority_tier', 'P3')
+    )).fetchone()[0]
 
 def get_work_logs(limit=100, status_filter=None):
     """업무 기록 목록 조회"""
@@ -302,9 +375,11 @@ def update_work_log(log_id, update_data):
         fields = []
         values = []
         for k, v in update_data.items():
-            if k not in ('id', 'created_at'):
+            if k in EDITABLE_LOG_FIELDS:
                 fields.append(f"{k} = ?")
                 values.append(v if not isinstance(v, (list, dict)) else json.dumps(v, ensure_ascii=False))
+        if not fields:
+            return False
         values.append(log_id)
         cursor.execute(f"UPDATE work_logs SET {', '.join(fields)} WHERE id = ?", values)
         conn.commit()
@@ -316,7 +391,8 @@ def delete_work_log(log_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM work_logs WHERE id = ?", (log_id,))
-        cursor.execute("DELETE FROM work_logs_fts WHERE rowid = ?", (log_id,))
+        if not postgres_enabled():
+            cursor.execute("DELETE FROM work_logs_fts WHERE rowid = ?", (log_id,))
         conn.commit()
         record_audit("담당자", "DELETE_LOG", f"ID #{log_id}", "업무 기록 삭제")
         return True
@@ -337,20 +413,21 @@ def search_rag_knowledge(query_text, limit=5):
         clean_tokens = [w for w in "".join([c if c.isalnum() else " " for c in query_text]).split() if len(w) > 1]
         fts_query = " OR ".join(clean_tokens) if clean_tokens else query_text
 
-        try:
-            cursor.execute("""
-            SELECT w.*, rank FROM work_logs w
-            JOIN work_logs_fts f ON w.id = f.rowid
-            WHERE work_logs_fts MATCH ?
-            ORDER BY rank LIMIT ?
-            """, (fts_query, limit))
+        if postgres_enabled():
+            cursor.execute("""SELECT w.*, -ts_rank(search_vector, q.query) AS rank FROM work_logs w
+                CROSS JOIN websearch_to_tsquery('simple', ?) AS q(query)
+                WHERE search_vector @@ q.query ORDER BY rank LIMIT ?""", (fts_query, limit))
             logs = cursor.fetchall()
-            for l in logs:
-                d = dict(l)
-                d['source_type'] = 'WORK_LOG'
-                results.append(d)
-        except Exception:
-            pass
+        else:
+            try:
+                cursor.execute("""SELECT w.*, rank FROM work_logs w
+                    JOIN work_logs_fts f ON w.id = f.rowid WHERE work_logs_fts MATCH ?
+                    ORDER BY rank LIMIT ?""", (fts_query, limit))
+                logs = cursor.fetchall()
+            except sqlite3.Error:
+                logs = []
+        for log in logs:
+            results.append({**dict(log), 'source_type': 'WORK_LOG'})
 
         # 부족할 경우 일반 LIKE 매칭 폴백
         if len(results) < limit:
@@ -493,7 +570,7 @@ def save_handover_report(report_data):
             summary, completed_tasks, pending_tasks, critical_alerts,
             parts_awaiting, follow_up_tasks, carried_over_tasks, next_shift_actions,
             raw_markdown
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
         """, (
             report_data.get('shift_title', '정기 교대 인수인계 보고서'),
             report_data.get('outgoing_shift', '야간조'),
@@ -510,8 +587,8 @@ def save_handover_report(report_data):
             report_data.get('next_shift_actions', ''),
             report_data.get('raw_markdown', '')
         ))
+        report_id = cursor.fetchone()[0]
         conn.commit()
-        report_id = cursor.lastrowid
         record_audit(report_data.get('author', '시스템'), "GENERATE_REPORT", f"보고서 #{report_id}", "인수인계 보고서 자동 생성")
         return report_id
 
@@ -546,16 +623,20 @@ def get_handover_reports(limit=10):
         cursor.execute("SELECT * FROM handover_reports ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(r) for r in cursor.fetchall()]
 
+def insert_audit(conn, operator, action, target, detail, created_at=None):
+    if created_at is None:
+        created_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("""
+        INSERT INTO audit_trails (operator, action, target, detail, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (operator, action, target, detail, created_at))
+
+
 def record_audit(operator, action, target, detail):
     """감사 로그 저장"""
     try:
         with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-            INSERT INTO audit_trails (operator, action, target, detail)
-            VALUES (?, ?, ?, ?)
-            """, (operator, action, target, detail))
-            conn.commit()
+            insert_audit(conn, operator, action, target, detail)
     except Exception:
         pass
 
@@ -571,10 +652,10 @@ def add_technical_doc(filename, category, summary, key_points, full_content):
         cursor = conn.cursor()
         cursor.execute("""
         INSERT INTO technical_documents (filename, category, summary, key_points, full_content)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?) RETURNING id
         """, (filename, category, summary, key_points, full_content))
+        doc_id = cursor.fetchone()[0]
         conn.commit()
-        doc_id = cursor.lastrowid
         record_audit("시스템", "ADD_DOC", f"SOP #{doc_id}", filename)
         return doc_id
 

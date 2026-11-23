@@ -27,7 +27,7 @@ def ensure_environment():
     if not interpreter.is_file():
         subprocess.run([sys.executable, "-m", "venv", str(ENGINE / ".venv")], check=True)
     check = subprocess.run(
-        [str(interpreter), "-c", "import fastapi, uvicorn, dotenv, httpx"],
+        [str(interpreter), "-c", "import fastapi, uvicorn, dotenv, httpx, psycopg"],
         capture_output=True,
     )
     if check.returncode:
@@ -75,17 +75,27 @@ def main():
 
     engine_url = f"http://127.0.0.1:{engine_port}"
     web_url = f"http://127.0.0.1:{web_port}"
+    web_dsn = os.getenv('SHIFT_BRIDGE_DATABASE_URL') if args.app == 'Agent' else None
+    common = {key: value for key, value in os.environ.items()
+              if key not in {'SHIFT_BRIDGE_DATABASE_URL', 'SHIFT_BRIDGE_ENGINE_DATABASE_URL'}}
+    common['PYTHONPATH'] = os.pathsep.join(filter(None, (str(ROOT), common.get('PYTHONPATH'))))
+    engine_environment = {key: value for key, value in common.items() if not key.startswith('SHIFT_BRIDGE_DCO_')}
+    engine_environment['HYBRID_API_AUTH_TOKEN'] = token
+    if engine_dsn := os.getenv('SHIFT_BRIDGE_ENGINE_DATABASE_URL'):
+        engine_environment['SHIFT_BRIDGE_ENGINE_DATABASE_URL'] = engine_dsn
     processes = []
     try:
         processes.append(subprocess.Popen(
             [str(interpreter), "-m", "uvicorn", "api_server:app", "--host", "127.0.0.1", "--port", str(engine_port)],
             cwd=ENGINE,
-            env={**os.environ, "HYBRID_API_AUTH_TOKEN": token},
+            env=engine_environment,
         ))
         wait_ready(processes[-1], engine_url + "/health")
-        web_environment = {key: value for key, value in os.environ.items() if key != "GEMINI_API_KEY"}
+        web_environment = {key: value for key, value in common.items() if key != "GEMINI_API_KEY"}
+        if web_dsn:
+            web_environment['SHIFT_BRIDGE_DATABASE_URL'] = web_dsn
         processes.append(subprocess.Popen(
-            [sys.executable, "app.py"],
+            [str(interpreter) if web_dsn else sys.executable, "app.py"],
             cwd=ROOT / args.app,
             env={**web_environment, "PORT": str(web_port), "SHIFT_BRIDGE_ENGINE_URL": engine_url,
                  "HYBRID_API_AUTH_TOKEN": token},

@@ -1,5 +1,6 @@
 **
 !Dockerfile
+!postgres_store.py
 !Agent/
 !Agent/*.py
 !Agent/static/

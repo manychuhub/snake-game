@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>관리자 대시보드 · SHIFT BRIDGE</title>
+    <link rel="stylesheet" href="/account.css">
+    <script src="/admin.js" defer></script>
+    <script src="/preferences.js" defer></script>
+</head>
+<body>
+    <main class="admin">
+        <header>
+            <div><span class="brand-link">SHIFT BRIDGE</span><h1>관리자 대시보드</h1></div>
+            <div class="controls">
+                <a href="/account/preferences">계정 설정</a>
+                <a href="/workspace">업무 화면으로</a>
+            </div>
+        </header>
+        <section class="engine-panel" aria-labelledby="engine-title">
+            <div>
+                <h2 id="engine-title">Gemini 연결</h2>
+                <p id="engine-status" role="status">설정 확인 중…</p>
+            </div>
+            <button class="secondary" id="test-engine" type="button" disabled>AI 생성 테스트</button>
+        </section>
+        <section class="admin-panel preferences-panel" id="preferences" aria-labelledby="preferences-title" data-admin-dashboard></section>
+        <nav aria-label="관리 메뉴">
+            <button data-category="login" aria-pressed="true">로그인 기록</button>
+            <button data-category="ai" aria-pressed="false">AI 생성 기록</button>
+            <button data-category="feature" aria-pressed="false">기능별 사용 기록</button>
+            <button data-category="members" aria-pressed="false">화이트리스트</button>
+        </nav>
+        <section class="admin-panel" aria-labelledby="section-title">
+            <h2 id="section-title">로그인 기록</h2>
+            <form class="controls" id="search">
+                <label for="query">아이디</label>
+                <input id="query" type="search" maxlength="64">
+                <button>검색</button>
+                <button class="secondary" id="refresh" type="button">새로고침</button>
+            </form>
+            <p id="message" role="status"></p>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr id="columns"></tr></thead>
+                    <tbody id="records"></tbody>
+                </table>
+            </div>
+            <button class="secondary" id="more" hidden>이전 기록 더 보기</button>
+        </section>
+    </main>
+</body>
+</html>

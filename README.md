@@ -2,11 +2,13 @@
 
 Windows에서 SHIFT BRIDGE와 자체 AI 엔진을 한 폴더로 옮겨 실행하는 패키지입니다.
 
-웹앱과 터미널은 BridgeCLI를 통해 Gemini를 사용합니다. CLI는 인수인계, 문서 검색, 초안 승인처럼 DCO 업무에 맞춘 명령을 제공합니다. Windows에서 사용하거나 [AWS 사설 웹 파일럿](deploy/README.md)을 배포할 수 있습니다.
+웹앱과 터미널은 BridgeCLI를 통해 Gemini를 사용합니다. CLI는 인수인계, 문서 검색, 초안 승인처럼 DCO 업무에 맞춘 명령을 제공합니다. Windows에서 사용하거나 [Render 웹 파일럿](deploy/RENDER.md) 또는 [AWS 사설 웹 파일럿](deploy/README.md)을 배포할 수 있습니다.
 
 ## GitHub 자동 업로드
 
-`Publish.bat`을 열어 두면 저장한 소스를 공개 저장소 `manychuhub/snake-game`의 `shift-bridge` 브랜치로 올립니다. 최초 GitHub 인증은 Git Credential Manager 안내에 따라 완료하세요. `Publish.bat --once`는 한 번 업로드하고 종료하며, 자동 업로드 종료는 `Ctrl+C`입니다. `publish.py`의 파일 목록에 포함된 UTF-8 소스만 처리합니다. 새 소스 파일을 추가할 때는 이 목록에도 해당 경로를 넣으세요.
+Windows에서 Git을 설치한 뒤 이 폴더의 PowerShell에서 `.\Publish.bat --install`을 한 번 실행합니다. 처음 실행할 때 Git Credential Manager 안내에 따라 GitHub에 로그인합니다. 설치가 끝나면 작업 스케줄러의 **SHIFT BRIDGE GitHub Publish**가 즉시 시작되며, 이후 Windows 로그인마다 백그라운드에서 실행됩니다. 결과와 오류는 이 폴더의 `publish.log`에서 확인합니다.
+
+저장한 소스는 공개 저장소 `manychuhub/snake-game`의 `shift-bridge` 브랜치에 반영됩니다. 즉시 반영하려면 `.\Publish.bat --once`를 실행합니다. 자동화는 `publish.py`의 파일 목록에 포함된 UTF-8 소스만 처리합니다. 새 소스 경로는 이 목록에 추가합니다. 자동 업로드를 끄려면 작업 스케줄러에서 해당 작업을 종료하고 사용 안 함으로 설정합니다.
 
 | 경로 | 용도 |
 |---|---|
@@ -29,3 +31,17 @@ Windows에서 SHIFT BRIDGE와 자체 AI 엔진을 한 폴더로 옮겨 실행하
 웹앱의 생성 요청은 인증된 로컬 API를 거쳐 BridgeCLI에 도착하고, BridgeCLI가 Gemini API를 호출합니다. 각 웹앱은 자체 SQLite에 기록과 보고서를 저장하며 CLI의 업무 명령도 별도 SQLite를 사용합니다. 웹과 CLI의 저장 데이터 및 승인 상태 동기화는 별도 작업입니다.
 
 이 이동본에는 Python 웹앱과 BridgeCLI 소스를 담았습니다. 원본의 Render/Node.js 배포 파일, API 설정, 기존 DB, 업로드, 가상환경과 Git 이력은 제외했습니다. 기존 기록이 필요하면 앱을 종료하고 각 원본의 shift_bridge.db와 uploads, 또는 BridgeCLI의 data를 대응 폴더에 별도로 복사합니다. 첫 실행에서 웹앱은 기존 코드의 데모 데이터를 생성할 수 있습니다.
+
+## 웹 계정 및 관리자 대시보드
+
+`Start.bat`으로 기본 앱을 실행하고 `http://127.0.0.1:8000/login`에서 가입 또는 로그인합니다. `SHIFT-BRIDGE-Portable` 폴더의 PowerShell에서 `py -3 .\Agent\accounts.py admin`을 실행하면 새 관리자 계정을 만들 수 있습니다. `admin`을 원하는 아이디로 바꿔 관리자를 추가할 수 있습니다. 가입한 계정에 관리자 권한을 부여하려면 `--grant-admin`을, 관리자 비밀번호를 재설정하려면 `--reset-password`를 사용합니다.
+
+관리자는 업무 화면 상단의 **관리자 대시보드**에서 로그인 성공·실패, AI 요청 결과, 기능별 API 사용 이력, 회원 화이트리스트를 아이디로 조회할 수 있습니다. **AI 생성 테스트**에는 서버에 설정된 Gemini 키가 사용됩니다.
+
+**기본 장소**에서 기본 위치와 장소 종류를 계정별로 저장합니다. 관리자는 관리자 대시보드에서, 일반 회원은 업무 화면의 **계정 설정**에서 이용합니다. 빈 항목을 저장하면 해당 값이 지워집니다. 설정은 서버의 SQLite에 저장되며, 서버가 로그인 세션의 사용자 ID를 기준으로 자기 행만 읽고 쓸 수 있게 제한합니다. SQLite에는 데이터베이스 RLS가 없습니다.
+
+**계정 설정**에서는 현재 비밀번호로 본인 확인 후 비밀번호를 변경하거나 탈퇴할 수 있습니다. 두 작업 모두 해당 계정의 모든 세션을 종료합니다. 탈퇴하면 로그인 정보와 기본 장소 설정이 삭제됩니다. 업무 기록과 감사 이력은 보존되며, 탈퇴한 아이디의 재가입과 마지막 관리자의 탈퇴는 제한됩니다.
+
+Render에서는 웹 계정과 업무 데이터, BridgeCLI 데이터를 Supabase PostgreSQL에 저장할 수 있습니다. 기존 SQLite 파일의 백업과 이전, 역할별 접속 설정은 [Render 이전 절차](deploy/RENDER.md#supabase로-이전하기)에 있습니다.
+
+일반 회원은 한국 시간 기준 하루에 Gemini 생성 요청을 세 번 보낼 수 있습니다. API에 요청을 보냈다가 실패한 경우에도 횟수를 사용합니다. 업무 자동 분류는 누락 검사까지 포함해 한 번으로 집계됩니다. 관리자와 화이트리스트 회원은 한도 적용에서 제외됩니다. 관리자 계정은 기존 작업 데이터를 사용하고 일반 회원의 작업 데이터는 계정별 SQLite에 저장됩니다.

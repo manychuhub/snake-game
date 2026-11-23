@@ -20,11 +20,12 @@
             <h2 id="shiftSummaryHeading">교대 현황</h2>
             <dl>
                 <div><dt>현재 교대</dt><dd id="currentShiftText">야간조 → 주간조</dd></div>
-                <div><dt>리전</dt><dd>ap-northeast-2</dd></div>
-                <div><dt>데이터센터</dt><dd>ICN-50 Pod-B</dd></div>
+                <div><dt>리전</dt><dd id="site-region">ap-northeast-2</dd></div>
+                <div><dt>데이터센터</dt><dd id="site-datacenter">ICN-50 Pod-B</dd></div>
             </dl>
         </section>
         <nav class="nav-tabs" aria-label="업무 메뉴">
+            <a class="nav-tab" href="/about"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> 에이전트 소개</a>
             <button class="nav-tab active" aria-current="page" aria-controls="tab-classify" data-heading="데이터센터 교대 인수인계" onclick="switchTab('tab-classify', this)">
                 <i class="fa-solid fa-file-pen" aria-hidden="true"></i> 업무 기록 및 분류
             </button>
@@ -66,12 +67,46 @@
                     <i class="fa-solid fa-user-shield" aria-hidden="true"></i>
                     <span id="activeOperatorName">김당직 (야간조)</span>
                 </div>
-                <button class="btn-api-key" onclick="openApiKeyModal()">
+                <span id="aiQuota" aria-live="polite"></span>
+                <a id="adminLink" class="demo-login" href="/admin" hidden>관리자 대시보드</a>
+                <a id="preferencesLink" class="demo-login" href="/account/preferences" hidden>계정 설정</a>
+                <button id="logoutButton" type="button" class="btn-api-key" hidden>로그아웃</button>
+                <button id="engineButton" class="btn-api-key" onclick="openApiKeyModal()" hidden>
                     <i class="fa-solid fa-key" aria-hidden="true"></i> <span id="apiKeyStatusText">BridgeCLI 연결</span>
                 </button>
+                <a id="demo-login" class="demo-login" href="/workspace" hidden>로그인</a>
             </div>
         </header>
         <main class="main-container">
+            <p id="demo-notice" class="demo-notice" hidden><strong>공개 체험</strong> 가상 업무 기록, 분류 결과와 교대 보고서를 둘러볼 수 있습니다.</p>
+
+        <section id="workspaceAi" class="dco-command panel" aria-labelledby="dcoCommandTitle" hidden>
+            <div class="dco-heading">
+                <h2 id="dcoCommandTitle"><i class="fa-solid fa-terminal" aria-hidden="true"></i> AI 명령</h2>
+                <div class="dco-heading-actions">
+                    <label for="dcoMode">연결 모드</label>
+                    <select id="dcoMode" class="input-select">
+                        <option value="api">실제 API</option>
+                        <option value="mock">모의 실행</option>
+                    </select>
+                    <button id="openMediaExecutor" type="button" class="btn-sample">저장 매체 삭제·폐기</button>
+                </div>
+            </div>
+            <p id="dcoMockNotice" class="dco-notice" hidden>모의 실행 · 가상 기록만 사용하며 변경은 이 페이지에서만 유지됩니다.</p>
+            <form id="dcoCommandForm" class="dco-input-row">
+                <input id="dcoCommandInput" class="input-text" aria-label="자연어 명령" maxlength="4000" required
+                       placeholder="예: 야간 장애 티켓 열어">
+                <button class="btn-primary" type="submit">실행</button>
+            </form>
+            <div class="dco-shortcuts" aria-label="추천 명령">
+                <button type="button" class="btn-sample" data-prompt="야간 장애 티켓 열어">야간 장애 티켓</button>
+                <button type="button" class="btn-sample" data-prompt="IPMI 콘솔 열어 " data-fill>IPMI 콘솔</button>
+                <button type="button" class="btn-sample" data-prompt="미완료 하드웨어 교체 목록 보여 줘">미완료 하드웨어 교체</button>
+                <button type="button" class="btn-sample" data-prompt="미완료 하드웨어 교체 담당자에게 알림 보내" data-fill>담당자 알림</button>
+                <button id="openAiActivity" type="button" class="btn-sample">작업 알림함</button>
+            </div>
+            <div id="dcoCommandLog" class="dco-results" role="log" aria-label="명령 결과"></div>
+        </section>
 
         <!-- ============================================================== -->
         <!-- 탭 1: 자유 형식 업무 기록 & 11개 필드 자동 분류 -->
@@ -183,12 +218,13 @@
                     <div>
                         <h2><i class="fa-solid fa-list-check" aria-hidden="true"></i> 최근 업무 기록</h2>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="workLogFilters">
                         <button class="btn-filter active" onclick="filterLogs(null, this)">전체</button>
                         <button class="btn-filter" onclick="filterLogs('미완료', this)">미완료만</button>
                         <button class="btn-filter" onclick="filterLogs('완료', this)">완료만</button>
                     </div>
                 </div>
+                <p id="dcoWorkLogFilter" class="dco-notice" role="status" hidden></p>
                 <div class="table-responsive">
                     <table class="aws-table" id="workLogsTable">
                         <thead>
@@ -275,6 +311,22 @@
         <!-- 탭 3: 근무 종합 인수인계 보고서 (8대 필수 섹션 & 승인) -->
         <!-- ============================================================== -->
         <section id="tab-report" class="tab-pane">
+            <section id="dcoActivity" class="panel dco-activity" aria-labelledby="dcoActivityTitle" hidden>
+                <div class="dco-heading">
+                    <h2 id="dcoActivityTitle" tabindex="-1">AI 인계 이력</h2>
+                    <button id="refreshAiActivity" type="button" class="btn-sample">새로고침</button>
+                </div>
+                <h3>받은 작업 알림</h3>
+                <ul id="dcoNotifications" class="dco-notifications" aria-live="polite"></ul>
+                <h3>감사 로그</h3>
+                <p id="dcoAuditStatus" class="dco-notice" role="status"></p>
+                <div class="table-responsive">
+                    <table class="aws-table">
+                        <thead><tr><th>시각</th><th>요청자</th><th>명령</th><th>대상 ID</th><th>결과</th></tr></thead>
+                        <tbody id="dcoAuditRows"></tbody>
+                    </table>
+                </div>
+            </section>
             <div class="grid-report">
                 <!-- 좌측 컨트롤 -->
                 <div class="panel" style="flex: 1;">
@@ -611,13 +663,13 @@
             <div class="panel" style="max-width: 900px; margin: 0 auto; height: 680px; display: flex; flex-direction: column;">
                 <div class="panel-header">
                     <h2><i class="fa-solid fa-robot"></i> SHIFT BRIDGE 자연어 Ops 에이전트</h2>
-                    <span class="subtext">Gemini Function Calling을 통해 자연어 명령만으로 시스템 기능을 안전하게 실행합니다. (데이터 수정/삭제는 사용자 확인 후 실행)</span>
+                    <span class="subtext">업무 기록을 조회하고 상태를 변경할 수 있습니다. 상태 변경은 승인 후 적용됩니다.</span>
                 </div>
 
-                <div class="chat-container" id="agentChatContainer">
+                <div class="chat-container" id="agentChatContainer" role="log" aria-label="AI 대화">
                     <div class="chat-bubble ai">
-                        안녕하세요! AWS DCO 자율 운영 에이전트입니다. 🤖<br>
-                        원하시는 작업을 자연어로 편하게 말씀해 주세요. 아래 추천 명령 버튼을 클릭하셔도 즉시 실행됩니다!
+                        업무 기록에 대해 질문하거나 티켓 번호와 변경할 상태를 입력하세요.<br>
+                        새 업무를 등록하려면 /기록 뒤에 업무 내용을 입력하세요.
                     </div>
                 </div>
 
@@ -632,7 +684,7 @@
                 </div>
 
                 <div class="agent-input-row">
-                    <input type="text" id="agentInput" class="input-text" placeholder="자연어로 원하는 작업을 명령하세요..." onkeypress="if(event.key==='Enter') sendAgentMessage()">
+                    <input type="text" id="agentInput" class="input-text" aria-label="Ops 에이전트 메시지" maxlength="4000" placeholder="자연어로 원하는 작업을 명령하세요..." onkeypress="if(event.key==='Enter' && !event.isComposing) sendAgentMessage()">
                     <button class="btn-primary" onclick="sendAgentMessage()">
                         <i class="fa-solid fa-paper-plane"></i> 전송
                     </button>
@@ -665,6 +717,53 @@
     </div>
 
     <!-- API 키 설정 모달 -->
+    <dialog id="dcoDetail" class="dco-dialog dco-drawer" aria-labelledby="dcoDetailTitle">
+        <div class="dco-heading">
+            <h2 id="dcoDetailTitle">장비 상세</h2>
+            <button type="button" class="btn-sample" data-close-dialog>닫기</button>
+        </div>
+        <dl id="dcoDetailContext" class="dco-context"></dl>
+        <p id="dcoDetailNote" class="dco-notice" hidden></p>
+        <div id="dcoDetailActions" class="dco-shortcuts">
+            <button type="button" class="btn-sample" data-prompt="관련 SOP와 고장 진단 절차를 알려 줘">SOP · 고장 진단</button>
+            <button type="button" class="btn-sample" data-prompt="이 대상의 이전 교대 이력을 보여 줘">이전 교대 이력</button>
+            <button type="button" class="btn-sample" data-prompt="이 부품의 저장 매체 삭제 규정을 알려 줘">삭제 규정</button>
+            <button type="button" class="btn-sample" data-prompt="IPMI 콘솔 열어" data-requires="serverId">IPMI 콘솔</button>
+            <button type="button" class="btn-sample" data-prompt="이 티켓을 완료로 변경해 줘" data-requires="ticketId">완료 처리</button>
+            <button type="button" class="btn-sample" data-prompt="인계 노트 추가: " data-requires="ticketId" data-fill>인계 노트 추가</button>
+            <button id="detailMediaExecutor" type="button" class="btn-sample" data-requires="serialNumber">저장 매체 삭제·폐기</button>
+        </div>
+        <div id="dcoDetailLog" class="chat-container dco-results" role="log" aria-label="상세 컨텍스트 AI 대화"></div>
+        <form id="dcoDetailForm" class="dco-input-row">
+            <input id="dcoDetailInput" class="input-text" aria-label="상세 화면 AI 메시지" maxlength="4000" required
+                   placeholder="현재 대상에 대해 질문하거나 조치를 요청하세요">
+            <button class="btn-primary" type="submit">전송</button>
+        </form>
+    </dialog>
+
+    <dialog id="dcoMedia" class="dco-dialog" aria-labelledby="dcoMediaTitle">
+        <div class="dco-heading">
+            <h2 id="dcoMediaTitle">저장 매체 삭제·폐기</h2>
+            <button type="button" class="btn-sample" data-close-dialog>닫기</button>
+        </div>
+        <form id="dcoMediaForm" class="dco-media-form">
+            <label for="dcoMediaSerial">시리얼 번호</label>
+            <input id="dcoMediaSerial" class="input-text" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*"
+                   placeholder="시리얼 번호 입력" required>
+            <div class="dco-shortcuts">
+                <button class="btn-sample" type="submit" value="삭제 로그 검증">삭제 로그 검증</button>
+                <button class="btn-sample" type="submit" value="폐기 대기 전환">폐기 대기 전환</button>
+                <button class="btn-sample" type="submit" value="폐기 증적 리포트 초안 생성">증적 리포트 초안</button>
+            </div>
+            <label for="dcoMediaInput">자연어 요청</label>
+            <div class="dco-input-row">
+                <input id="dcoMediaInput" class="input-text" maxlength="4000" placeholder="예: 삭제 로그 검증">
+                <button class="btn-primary" type="submit" value="">전송</button>
+            </div>
+        </form>
+        <div id="dcoMediaLog" class="dco-results" role="log" aria-label="삭제·폐기 요청 결과"></div>
+    </dialog>
+
     <div id="apiKeyModal" class="modal-backdrop" style="display: none;">
         <div class="modal-box">
             <div class="modal-header">
@@ -672,7 +771,7 @@
                 <button class="btn-close" onclick="closeApiKeyModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <p class="modal-desc">키와 모델은 BridgeCLI/.env에서 설정한 뒤 앱을 다시 시작하세요.</p>
+                <p class="modal-desc">Gemini 키는 Windows의 BridgeCLI/.env 또는 Render의 Environment에서 설정한 뒤 서비스를 다시 시작하세요.</p>
                 <div id="apiKeyTestResult" class="test-result-box"></div>
 
             </div>
@@ -686,5 +785,7 @@
     </div>
 
     <script src="/app.js"></script>
+    <script src="/workspace-ai-mock.js"></script>
+    <script src="/workspace-ai.js"></script>
 </body>
 </html>

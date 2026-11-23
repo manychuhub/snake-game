@@ -2,9 +2,13 @@
 
 import argparse
 import hashlib
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -13,18 +17,31 @@ ROOT = Path(__file__).resolve().parent
 REPOSITORY = 'https://github.com/manychuhub/snake-game.git'
 BRANCH = 'shift-bridge'
 AUTHOR = ('user.name=manychuhub', 'user.email=265815235+manychuhub@users.noreply.github.com')
+TASK_NAME = 'SHIFT BRIDGE GitHub Publish'
+LOG = logging.getLogger('shift-bridge-publish')
 PATHS = (
     '.dockerignore', '.gitignore', '.github/workflows/aws-release.yml', 'Dockerfile',
-    'README.md', 'Start.bat', 'Publish.bat', 'launch.py', 'publish.py',
-    'Agent/README.md', 'Agent/app.py', 'Agent/alb_identity.py', 'Agent/database.py',
-    'Agent/gemini_client.py', 'Agent/static/index.html', 'Agent/static/style.css',
-    'Agent/static/app.js', 'Agent/tests/test_web.py',
+    'AGENTS.md', 'README.md', 'Start.bat', 'Publish.bat', 'launch.py', 'publish.py', 'postgres_store.py',
+    'Agent/README.md', 'Agent/app.py', 'Agent/ai_commands.py', 'Agent/ai_workspace.py', 'Agent/alb_identity.py', 'Agent/database.py',
+    'Agent/gemini_client.py', 'Agent/demo.py', 'Agent/static/index.html', 'Agent/static/style.css',
+    'Agent/static/app.js', 'Agent/static/about.html', 'Agent/static/about.css', 'Agent/static/about.js',
+    'Agent/static/workspace-ai.js', 'Agent/static/workspace-ai-mock.js',
+    'Agent/accounts.py', 'Agent/static/account.html', 'Agent/static/account.css',
+    'Agent/static/account.js', 'Agent/static/admin.html', 'Agent/static/admin.js',
+    'Agent/static/preferences.html', 'Agent/static/preferences.js',
+    'Agent/tests/test_web.py',
+    'Agent/dco_tools.py', 'Agent/tests/test_dco_tools.py',
     'BridgeCLI/.env.example', 'BridgeCLI/README.md', 'BridgeCLI/api_server.py',
     'BridgeCLI/bridge_cli.py', 'BridgeCLI/config.py', 'BridgeCLI/gemini_api.py',
     'BridgeCLI/memory.py', 'BridgeCLI/shift_bridge_client.py', 'BridgeCLI/requirements.txt',
     'BridgeCLI/bridge.bat', 'BridgeCLI/start.bat', 'BridgeCLI/stop.bat',
     'BridgeCLI/test.bat', 'BridgeCLI/tests/test_bridge.py',
-    'deploy/README.md', 'deploy/aws.yml', 'deploy/run.py',
+    'deploy/README.md', 'deploy/RENDER.md', 'deploy/aws.yml', 'deploy/run.py',
+    'deploy/sqlite_backup.py', 'deploy/import_sqlite.py', 'deploy/test_postgres_migration.py', 'deploy/test_render_tls.py',
+    'supabase/migrations/20261120000100_shift_bridge_storage.sql',
+    'supabase/migrations/20261123000100_ai_confirmations.sql',
+    'supabase/migrations/20261123000200_ai_notifications.sql',
+    'supabase/migrations/20261123000500_dco_ai_tools.sql',
     'test/README.md', 'test/app.py', 'test/alb_identity.py', 'test/database.py',
     'test/gemini_client.py', 'test/static/index.html', 'test/static/style.css', 'test/static/app.js',
 )
@@ -59,8 +76,25 @@ def source_files():
 
 
 def git(directory, *args, **options):
-    return subprocess.run(['git', '-c', 'core.autocrlf=false', '-C', str(directory), *args],
-                          encoding='utf-8', errors='replace', **options)
+    command = ['git', '-c', 'core.autocrlf=false', '-C', str(directory), *args]
+    if LOG.handlers:
+        checked = options.pop('check', False)
+        result = subprocess.run(command, encoding='utf-8', errors='replace', capture_output=True,
+                                timeout=90, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                                env={**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GCM_INTERACTIVE': 'never'},
+                                **options)
+        if checked and result.returncode:
+            detail = CREDENTIAL.sub('[redacted]', result.stderr.strip())
+            raise RuntimeError(f'git {args[0]} failed ({result.returncode}): {detail}')
+        return result
+    return subprocess.run(command, encoding='utf-8', errors='replace', **options)
+
+
+def report(message):
+    if LOG.handlers:
+        LOG.info(message)
+    else:
+        print(message, flush=True)
 
 
 def publish(files):
@@ -68,52 +102,94 @@ def publish(files):
         worktree = Path(temporary).resolve()
         git(worktree, 'clone', '--quiet', '--depth', '1', '--single-branch', '--branch', BRANCH,
             REPOSITORY, '.', check=True)
-        tracked = set(git(worktree, 'ls-files', '-z', check=True, capture_output=True).stdout.split('\0'))
-        staged = []
-        for name in PATHS:
+        for name, content in files.items():
             target = worktree / name
             if not target.resolve().is_relative_to(worktree):
                 raise ValueError(f'Remote path is outside the checkout: {name}')
-            if name in files:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(files[name], encoding='utf-8', newline='\n')
-                staged.append(name)
-            elif name in tracked:
-                target.unlink(missing_ok=True)
-                staged.append(name)
-        if not staged:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding='utf-8', newline='\n')
+        if not files:
             return
-        git(worktree, 'add', '-A', '--', *staged, check=True)
+        git(worktree, 'add', '--', *files, check=True)
         changed = git(worktree, 'diff', '--cached', '--quiet', '--').returncode
         if changed == 0:
-            print('GitHub already has this version.', flush=True)
+            report('GitHub already has this version.')
             return
         if changed != 1:
             raise RuntimeError('Could not inspect staged changes.')
         git(worktree, '-c', AUTHOR[0], '-c', AUTHOR[1], 'commit', '-qm', 'Update SHIFT BRIDGE', check=True)
         git(worktree, 'push', 'origin', f'HEAD:refs/heads/{BRANCH}', check=True)
-        print(f'Published to {REPOSITORY.removesuffix(".git")}/tree/{BRANCH}', flush=True)
+        report(f'Published to {REPOSITORY.removesuffix(".git")}/tree/{BRANCH}')
+
+
+def install():
+    if os.name != 'nt':
+        raise RuntimeError('Install the login task from Windows using Publish.bat --install.')
+    publish(source_files())
+    interpreter = Path(sys.executable)
+    gui_interpreter = interpreter.with_name('pythonw.exe')
+    environment = {
+        **os.environ, 'SHIFT_PUBLISH_PYTHON': str(gui_interpreter if gui_interpreter.is_file() else interpreter),
+        'SHIFT_PUBLISH_SCRIPT': str(Path(__file__).resolve()), 'SHIFT_PUBLISH_ROOT': str(ROOT),
+        'SHIFT_PUBLISH_TASK': TASK_NAME,
+    }
+    script = r"""
+        $ErrorActionPreference = 'Stop'
+        $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $action = New-ScheduledTaskAction -Execute $env:SHIFT_PUBLISH_PYTHON `
+            -Argument ('"{0}" --background' -f $env:SHIFT_PUBLISH_SCRIPT) -WorkingDirectory $env:SHIFT_PUBLISH_ROOT
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `
+            -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+        $existing = Get-ScheduledTask -TaskName $env:SHIFT_PUBLISH_TASK -ErrorAction SilentlyContinue
+        if ($existing -and $existing.State -eq 'Running') {
+            Stop-ScheduledTask -InputObject $existing
+        }
+        Register-ScheduledTask -TaskName $env:SHIFT_PUBLISH_TASK -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings -Force | Out-Null
+        Start-ScheduledTask -TaskName $env:SHIFT_PUBLISH_TASK
+    """
+    subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
+                   env=environment, check=True)
+    report(f'Started Windows scheduled task "{TASK_NAME}". Log: {ROOT / "publish.log"}')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--once', action='store_true', help='Upload once and exit.')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--once', action='store_true', help='Upload once and exit.')
+    mode.add_argument('--install', action='store_true', help='Upload and start the Windows login task.')
+    mode.add_argument('--background', action='store_true', help='Watch and write status to publish.log.')
     options = parser.parse_args()
     if options.once:
         publish(source_files())
         return
-    print('Watching SHIFT BRIDGE source files. Ctrl+C stops automatic uploads.', flush=True)
+    if options.install:
+        install()
+        return
+    if options.background:
+        handler = RotatingFileHandler(ROOT / 'publish.log', maxBytes=262144, backupCount=2, encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+        LOG.addHandler(handler)
+        LOG.setLevel(logging.INFO)
+    report('Watching SHIFT BRIDGE source files.')
     last_seen = last_published = None
     while True:
         try:
             files = source_files()
             version = {name: hashlib.sha256(content.encode('utf-8')).digest() for name, content in files.items()}
             if version == last_seen and version != last_published:
-                publish(files)
+                changes = files if last_published is None else {
+                    name: content for name, content in files.items() if version[name] != last_published.get(name)
+                }
+                if changes:
+                    publish(changes)
                 last_published = version
             last_seen = version
-        except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
-            print(f'Publish paused: {error}', flush=True)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            report(f'Publish paused: {error}')
             time.sleep(20)
         time.sleep(5)
 
