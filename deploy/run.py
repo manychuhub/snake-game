@@ -6,6 +6,8 @@ from pathlib import Path
 import secrets
 import re
 import signal
+import ssl
+import tempfile
 import subprocess
 import sys
 import time
@@ -42,6 +44,40 @@ def render_settings(environment):
     }
 
 
+def render_ca_file(source, destination, pem):
+    if not pem:
+        try:
+            pem = source.read_text(encoding='ascii')
+        except (OSError, UnicodeError):
+            raise RuntimeError('Upload the PostgreSQL CA to Render Secret Files or set SHIFT_BRIDGE_POSTGRES_CA_PEM.') from None
+    # Copy only public certificates into the unprivileged service's trust file.
+    blocks = re.findall(r'-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----', pem)
+    if not blocks:
+        raise RuntimeError('The PostgreSQL CA must contain a PEM certificate.')
+    certificates = '\n'.join(blocks) + '\n'
+    try:
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=certificates)
+    except (ssl.SSLError, ValueError):
+        raise RuntimeError('Invalid PostgreSQL CA certificate in Render settings.') from None
+    with tempfile.NamedTemporaryFile(dir=destination, mode='w', encoding='ascii', delete=False) as output:
+        output.write(certificates)
+    os.chmod(output.name, 0o644)
+    return output.name
+
+
+def render_database(dsn, environment, directory, pem):
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    options = conninfo_to_dict(dsn)
+    root = options.get('sslrootcert') or environment.get('PGSSLROOTCERT', '')
+    source = Path(root or '/etc/secrets/supabase-ca.crt')
+    mounted = source.parent == Path('/etc/secrets') and source.name not in ('.', '..')
+    if not pem and (not mounted or (not root and not source.is_file())):
+        return dsn
+    ca = render_ca_file(source, directory, pem)
+    return make_conninfo(dsn, sslrootcert=ca)
+
+
 def main():
     def shutdown(_signum, _frame):
         raise KeyboardInterrupt
@@ -53,6 +89,7 @@ def main():
     on_render = environment.get('RENDER') == 'true'
     web_database = environment.pop('SHIFT_BRIDGE_DATABASE_URL', '')
     engine_database = environment.pop('SHIFT_BRIDGE_ENGINE_DATABASE_URL', '')
+    ca_pem = environment.pop('SHIFT_BRIDGE_POSTGRES_CA_PEM', '').strip()
     if on_render:
         allow_sqlite = environment.pop('SHIFT_BRIDGE_STORAGE_MODE', '') == 'sqlite'
         if not (web_database and engine_database) and (web_database or engine_database or not allow_sqlite):
@@ -78,6 +115,12 @@ def main():
     web_env = {**shared, **web_settings, 'SHIFT_BRIDGE_WEB_HOST': '0.0.0.0',
                'SHIFT_BRIDGE_DB_PATH': str(data / 'web/shift_bridge.db'), 'SHIFT_BRIDGE_SEED_DEMO': '0',
                'SHIFT_BRIDGE_ENGINE_URL': engine_url}
+    if on_render and web_database and engine_database:
+        # Parent owns the directory. Children can traverse it and read only public CAs.
+        ca_dir = tempfile.TemporaryDirectory(prefix='shift-bridge-ca-')
+        os.chmod(ca_dir.name, 0o711)
+        web_database = render_database(web_database, environment, ca_dir.name, ca_pem)
+        engine_database = render_database(engine_database, environment, ca_dir.name, ca_pem)
     if web_database:
         web_env['SHIFT_BRIDGE_DATABASE_URL'] = web_database
     if engine_database:
