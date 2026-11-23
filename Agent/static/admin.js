@@ -21,6 +21,7 @@ const features = {
     "/api/rag/query": "업무 지식 검색", "/api/anomalies/stats": "장애 통계 조회",
     "/api/anomalies/explain": "이상 징후 분석", "/api/priority/evaluate": "업무 우선순위 평가",
     "/api/improvements": "업무 개선 제안", "/api/translate": "보고서 번역", "/api/agent/command": "에이전트 명령",
+    "/api/ai/command": "AI 명령", "/api/ai/confirm": "AI 명령 승인·취소",
     "/api/audit": "감사 기록 조회", "/api/settings/status": "Gemini 설정 확인", "/api/settings/test": "AI 생성 테스트"
 };
 let category = "login";

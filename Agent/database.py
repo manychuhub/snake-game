@@ -59,6 +59,38 @@ def get_connection(path=None, *, account_id=None):
         with conn:
             yield conn
 
+def init_ai_confirmations(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_confirmations (
+            id TEXT PRIMARY KEY,
+            actor_id INTEGER NOT NULL,
+            log_id INTEGER NOT NULL,
+            ticket_no TEXT,
+            device_id TEXT,
+            expected_status TEXT,
+            new_status TEXT NOT NULL,
+            response TEXT
+        );
+    """)
+
+
+def init_dco_tables(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_tool_confirmations (
+            id TEXT PRIMARY KEY, actor_id INTEGER NOT NULL, tool TEXT NOT NULL, target_id TEXT,
+            payload TEXT NOT NULL, request_message TEXT NOT NULL, expires_at INTEGER NOT NULL,
+            response TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dco_work_requests (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL, item_id TEXT NOT NULL,
+            quantity INTEGER NOT NULL CHECK (quantity >= 0), details TEXT NOT NULL
+        )
+    """)
+    conn.execute('CREATE INDEX IF NOT EXISTS dco_work_requests_item ON dco_work_requests (kind, item_id)')
+
+
 def init_db(*, seed=True):
     """데이터베이스 스키마 초기화 및 샘플 데이터 시딩"""
     if postgres_enabled():
@@ -152,6 +184,9 @@ def init_db(*, seed=True):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
+
+        init_ai_confirmations(conn)
+        init_dco_tables(conn)
 
         # 6. FTS(Full Text Search) 가상 테이블 생성 (RAG 고속 검색)
         cursor.execute("""
@@ -269,35 +304,36 @@ def seed_sample_data(cursor):
 def add_work_log(log_data):
     """신규 업무 기록 추가 (FTS 동기화 자동)"""
     with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+        log_id = insert_work_log(conn, log_data)
+    record_audit(log_data.get('operator', '시스템'), 'ADD_LOG', f'ID #{log_id}', log_data.get('device_id', ''))
+    return log_id
+
+
+def insert_work_log(conn, log_data):
+    return conn.execute("""
         INSERT INTO work_logs (
             raw_text, execution_time, operator, device_id, ticket_no, incident_type,
             cause, action_taken, result, status, follow_up, remarks, audio_source,
             missing_alerts, priority_score, priority_tier
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-        """, (
-            log_data.get('raw_text', ''),
-            log_data.get('execution_time', '미확인'),
-            log_data.get('operator', '미확인'),
-            log_data.get('device_id', '미확인'),
-            log_data.get('ticket_no', '미확인'),
-            log_data.get('incident_type', '기타'),
-            log_data.get('cause', '미확인'),
-            log_data.get('action_taken', '미확인'),
-            log_data.get('result', '미확인'),
-            log_data.get('status', '미완료'),
-            log_data.get('follow_up', '미확인'),
-            log_data.get('remarks', '미확인'),
-            log_data.get('audio_source', ''),
-            json.dumps(log_data.get('missing_alerts', []), ensure_ascii=False),
-            log_data.get('priority_score', 50),
-            log_data.get('priority_tier', 'P3')
-        ))
-        log_id = cursor.fetchone()[0]
-        conn.commit()
-        record_audit(log_data.get('operator', '시스템'), "ADD_LOG", f"ID #{log_id}", log_data.get('device_id', ''))
-        return log_id
+    """, (
+        log_data.get('raw_text', ''),
+        log_data.get('execution_time', '미확인'),
+        log_data.get('operator', '미확인'),
+        log_data.get('device_id', '미확인'),
+        log_data.get('ticket_no', '미확인'),
+        log_data.get('incident_type', '기타'),
+        log_data.get('cause', '미확인'),
+        log_data.get('action_taken', '미확인'),
+        log_data.get('result', '미확인'),
+        log_data.get('status', '미완료'),
+        log_data.get('follow_up', '미확인'),
+        log_data.get('remarks', '미확인'),
+        log_data.get('audio_source', ''),
+        json.dumps(log_data.get('missing_alerts', []), ensure_ascii=False),
+        log_data.get('priority_score', 50),
+        log_data.get('priority_tier', 'P3')
+    )).fetchone()[0]
 
 def get_work_logs(limit=100, status_filter=None):
     """업무 기록 목록 조회"""
@@ -587,16 +623,20 @@ def get_handover_reports(limit=10):
         cursor.execute("SELECT * FROM handover_reports ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(r) for r in cursor.fetchall()]
 
+def insert_audit(conn, operator, action, target, detail, created_at=None):
+    if created_at is None:
+        created_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("""
+        INSERT INTO audit_trails (operator, action, target, detail, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (operator, action, target, detail, created_at))
+
+
 def record_audit(operator, action, target, detail):
     """감사 로그 저장"""
     try:
         with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-            INSERT INTO audit_trails (operator, action, target, detail)
-            VALUES (?, ?, ?, ?)
-            """, (operator, action, target, detail))
-            conn.commit()
+            insert_audit(conn, operator, action, target, detail)
     except Exception:
         pass
 

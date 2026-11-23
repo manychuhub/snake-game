@@ -44,7 +44,7 @@
    PYTHONPATH=. python deploy/import_sqlite.py /private/shift-bridge-backup
    ```
 
-2. Supabase의 비어 있는 테스트 프로젝트에서 [스키마 마이그레이션](../supabase/migrations/20261120000100_shift_bridge_storage.sql)을 트랜잭션으로 적용합니다. `shift_bridge_web`과 `shift_bridge_engine`에 각각 `LOGIN`을 부여하고 `psql`의 `\password`로 별도 비밀번호를 설정합니다. HTTPS API 키 대신 PostgreSQL 연결을 사용합니다. IPv4 연결에는 Connect 패널의 **Session pooler**를 선택하고, 역할별 접속으로 `sslmode=verify-full`과 Supabase CA 인증서를 사용합니다. [Supabase Postgres 연결](https://supabase.com/docs/guides/database/connecting-to-postgres)
+2. Supabase의 비어 있는 테스트 프로젝트에서 [스키마 마이그레이션](../supabase/migrations)을 파일명 순서대로 트랜잭션으로 적용합니다. 기존 PostgreSQL 환경에는 앱을 업데이트하기 전에 미적용 마이그레이션을 실행합니다. `shift_bridge_web`과 `shift_bridge_engine`에 각각 `LOGIN`을 부여하고 `psql`의 `\password`로 별도 비밀번호를 설정합니다. HTTPS API 키 대신 PostgreSQL 연결을 사용합니다. IPv4 연결에는 Connect 패널의 **Session pooler**를 선택하고, 역할별 접속으로 `sslmode=verify-full`과 Supabase CA 인증서를 사용합니다. [Supabase Postgres 연결](https://supabase.com/docs/guides/database/connecting-to-postgres)
 
 3. 대상과 원본을 검토한 뒤 스키마 소유자 연결을 `SHIFT_BRIDGE_MIGRATION_DATABASE_URL`에 비공개로 설정하고 복원합니다. 대상 테이블이 비어 있어야 합니다. 계정 ID, 비밀번호 해시, 계정 설정, 관리자 이력, 개인·공용 업무 기록, 보고서, 문서, 감사 이력과 BridgeCLI 데이터를 이전합니다. 이전 SQLite 세션은 제외됩니다. 복원은 원본과 대상의 행 수 및 행별 내용이 일치할 때만 커밋됩니다.
 

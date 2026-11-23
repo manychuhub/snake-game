@@ -9,7 +9,7 @@ import sqlite3
 from psycopg import Error, sql
 
 from postgres_store import StorageError, connect
-from sqlite_backup import ACCOUNT_TABLES, ENGINE_TABLES, WORK_TABLES, digest, read_only, table_counts
+from sqlite_backup import ACCOUNT_TABLES, DCO_TABLES, ENGINE_TABLES, WORK_TABLES, digest, read_only, table_counts
 
 WEB = 'shiftbridge_web'
 ENGINE = 'shiftbridge_engine'
@@ -46,7 +46,8 @@ def validate_backup(directory):
         with read_only(path) as conn:
             counts = table_counts(conn, tables)
             missing = set(tables) - counts.keys()
-            if counts != entry['tables'] or missing - {'web_sessions', 'web_preferences', 'web_events'}:
+            optional_tables = {'web_sessions', 'web_preferences', 'web_events', 'ai_notifications', *DCO_TABLES}
+            if counts != entry['tables'] or missing - optional_tables:
                 raise ValueError(f'Backup schema or row count verification failed for {filename}.')
             if [row[0] for row in conn.execute('PRAGMA integrity_check')] != ['ok']:
                 raise ValueError(f'SQLite integrity check failed for {filename}.')
@@ -131,7 +132,7 @@ def restore(directory, dsn):
             if digest(directory / entry['file']) != entry['sha256']:
                 raise ValueError('A SQLite backup file changed during the restore.')
         for schema, name in TARGETS:
-            if name in {'web_sessions', 'web_preferences', 'sqlite_import'}:
+            if name in {'web_sessions', 'web_preferences', 'sqlite_import', 'ai_notifications', *DCO_TABLES}:
                 continue
             table = sql.Identifier(schema, name)
             maximum = conn.execute(sql.SQL('SELECT coalesce(max(id), 0) FROM {}').format(table)).fetchone()[0]

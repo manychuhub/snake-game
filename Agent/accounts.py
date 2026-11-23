@@ -56,6 +56,12 @@ def init():
         );
         CREATE INDEX IF NOT EXISTS web_events_category ON web_events(category, id);
         CREATE INDEX IF NOT EXISTS web_events_quota ON web_events(username, category, day, result);
+        CREATE TABLE IF NOT EXISTS ai_notifications (
+            id TEXT PRIMARY KEY, sender_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
+            sender TEXT NOT NULL, ticket_no TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ai_notifications_sender ON ai_notifications(sender_id, created_at);
+        CREATE INDEX IF NOT EXISTS ai_notifications_recipient ON ai_notifications(recipient_id, created_at);
         """)
         db.lock_accounts(conn)
         columns = {row['name'] for row in conn.execute('PRAGMA table_info(web_users)')}

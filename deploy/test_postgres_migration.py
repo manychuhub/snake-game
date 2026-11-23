@@ -18,7 +18,9 @@ import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 import accounts
+import ai_commands
 import database
+import dco_tools
 from import_sqlite import restore, validate_backup
 from memory import Memory
 import postgres_store
@@ -77,8 +79,8 @@ class PostgresMigrationTest(unittest.TestCase):
         self.assertIn(options.get('hostaddr', options.get('host')), loopback)
         self.assertTrue(options.get('dbname', '').startswith('shift_bridge_test_'))
         with psycopg.connect(OWNER) as conn:
-            migration = ROOT / 'supabase/migrations/20261120000100_shift_bridge_storage.sql'
-            conn.execute(migration.read_text(encoding='utf-8'))
+            for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
+                conn.execute(migration.read_text(encoding='utf-8'))
             conn.execute('ALTER ROLE shift_bridge_web LOGIN')
             conn.execute('ALTER ROLE shift_bridge_engine LOGIN')
         web = make_conninfo(OWNER, user='shift_bridge_web')
@@ -98,6 +100,18 @@ class PostgresMigrationTest(unittest.TestCase):
                 member_id = accounts.session(old_token)['id']
                 accounts.save_preferences(member_id, old_token, {'default_location': '회원 위치', 'place_type': '시험실'})
                 first_id = database.add_work_log({'raw_text': '관리자 기록', 'status': '완료'})
+                fixture_inventory = json.dumps({'racks': {'RACK-01': {}}, 'hdd': {'HDD-TEST': 1}})
+                with patch.dict(os.environ, {'SHIFT_BRIDGE_DCO_INVENTORY_JSON': fixture_inventory}):
+                    old_admin = accounts.session(accounts.login('fixture-admin', 'fictional-admin-password'))
+                    with database.get_connection(sqlite_path) as conn:
+                        conn.execute("""INSERT INTO ai_notifications (id, sender_id, recipient_id, sender, ticket_no, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?)""", ('fixture-notice', old_admin['id'], member_id, 'fixture-admin',
+                                                         'TT-FIXTURE', '2026-01-01T00:00:00+00:00'))
+                    original = ai_commands.hardware(dco_tools.HDD_REQUEST, {'sku': 'HDD-TEST', 'rackId': 'RACK-01'},
+                                                    'RACK-01 HDD-TEST 반출', {}, old_admin)
+                    original_request = {'confirmationId': original['confirmationId'], 'approved': True}
+                    original_response = ai_commands.confirm(original_request, old_admin)
+                    self.assertEqual(original_response['status'], 'executed')
                 selection = database.workspace_db.set(accounts.workspace_path(member_id))
                 try:
                     self.assertEqual(database.add_work_log({'raw_text': '회원 기록', 'status': '완료'}), first_id)
@@ -119,6 +133,7 @@ class PostgresMigrationTest(unittest.TestCase):
             with psycopg.connect(web) as conn:
                 self.assertEqual(conn.execute('SELECT count(*) FROM shiftbridge_web.work_logs').fetchone()[0], 0)
                 self.assertEqual(conn.execute('SELECT count(*) FROM shiftbridge_web.web_preferences').fetchone()[0], 0)
+                self.assertEqual(conn.execute('SELECT count(*) FROM shiftbridge_web.ai_notifications').fetchone()[0], 0)
                 conn.execute("SELECT set_config('shift_bridge.workspace_id', %s, true)", (str(member_id),))
                 self.assertEqual(conn.execute('SELECT count(*) FROM shiftbridge_web.work_logs').fetchone()[0], 1)
                 self.assertEqual(conn.execute('UPDATE shiftbridge_web.work_logs SET raw_text=%s WHERE workspace_id=0',
@@ -127,16 +142,23 @@ class PostgresMigrationTest(unittest.TestCase):
                     conn.execute('INSERT INTO shiftbridge_web.work_logs(workspace_id, raw_text) VALUES(0, %s)', ('fixture',))
                 conn.execute("SELECT set_config('shift_bridge.account_id', %s, true)", (str(member_id),))
                 self.assertEqual(conn.execute('SELECT count(*) FROM shiftbridge_web.web_preferences').fetchone()[0], 1)
+                self.assertEqual(conn.execute('SELECT ticket_no FROM shiftbridge_web.ai_notifications').fetchone()[0], 'TT-FIXTURE')
                 with self.assertRaises(psycopg.errors.InsufficientPrivilege), conn.transaction():
                     conn.execute('INSERT INTO shiftbridge_web.web_preferences(user_id) VALUES(1)')
             with psycopg.connect(engine) as conn:
                 with self.assertRaises(psycopg.errors.InsufficientPrivilege), conn.transaction():
                     conn.execute('SELECT password FROM shiftbridge_web.web_users')
+                with self.assertRaises(psycopg.errors.InsufficientPrivilege), conn.transaction():
+                    conn.execute('SELECT id FROM shiftbridge_web.ai_tool_confirmations')
+                with self.assertRaises(psycopg.errors.InsufficientPrivilege), conn.transaction():
+                    conn.execute('SELECT id FROM shiftbridge_web.dco_work_requests')
             with psycopg.connect(web) as conn:
                 with self.assertRaises(psycopg.errors.InsufficientPrivilege), conn.transaction():
                     conn.execute('SELECT body FROM shiftbridge_engine.records')
 
-            with patch.dict(os.environ, {'SHIFT_BRIDGE_DATABASE_URL': web, 'SHIFT_BRIDGE_ENGINE_DATABASE_URL': engine}):
+            inventory = json.dumps({'racks': {'RACK-01': {}}, 'hdd': {'HDD-4TB': 1}})
+            with patch.dict(os.environ, {'SHIFT_BRIDGE_DATABASE_URL': web, 'SHIFT_BRIDGE_ENGINE_DATABASE_URL': engine,
+                                         'SHIFT_BRIDGE_DCO_INVENTORY_JSON': inventory}):
                 self.assertIsNone(accounts.session(old_token))
                 member = accounts.login('fixture-member', 'fictional-member-password')
                 admin = accounts.login('fixture-admin', 'fictional-admin-password')
@@ -148,6 +170,12 @@ class PostgresMigrationTest(unittest.TestCase):
                 with web_server(web, root / 'unavailable.db') as origin:
                     self.assertEqual(request(origin, '/api/logs')[0], 401)
                     self.assertEqual(request(origin, '/api/logs', token=admin)[1]['logs'][0]['raw_text'], '관리자 기록')
+                    self.assertEqual(request(origin, '/api/ai/confirm', token=admin, data=original_request),
+                                     (200, original_response))
+                    with postgres_store.database(web, workspace=0) as conn:
+                        restored = conn.execute('SELECT item_id, quantity FROM dco_work_requests WHERE id = ?',
+                                                (original['confirmationId'],)).fetchone()
+                        self.assertEqual((restored['item_id'], restored['quantity']), ('HDD-TEST', 1))
                     self.assertEqual(request(origin, '/api/logs', token=member)[1]['logs'][0]['raw_text'], '회원 기록')
                     values = request(origin, '/api/account/preferences', token=member)[1]
                     self.assertEqual(values['default_location'], '회원 위치')
@@ -162,13 +190,49 @@ class PostgresMigrationTest(unittest.TestCase):
                     self.assertEqual(request(origin, '/api/logs/update', token=member,
                                              data={'id': first_id, 'raw_text': '회원의 수정', 'workspace_id': 0})[0], 200)
                     self.assertEqual(request(origin, '/api/logs', token=admin)[1]['logs'][0]['raw_text'], '관리자 기록')
+                    status, created = request(origin, '/api/ai/command', token=member, data={
+                        'message': '/기록 상태 변경용 기록', 'context': {'ticketId': 'PG-1'},
+                    })
+                    self.assertEqual((status, created['type']), (200, 'pending_confirmation'))
+                    self.assertEqual(request(origin, '/api/ai/confirm', token=member, data={
+                        'confirmationId': created['confirmationId'], 'approved': True,
+                    })[1]['status'], 'executed')
+                    workspace = database.workspace_id.set(member_id)
+                    try:
+                        pending = ai_commands.propose_status_change(
+                            'PG-1 완료', {}, {'ticketId': 'PG-1', 'status': '완료'}, accounts.session(member))
+                    finally:
+                        database.workspace_id.reset(workspace)
+                    confirmation = {'confirmationId': pending['confirmationId'], 'approved': True}
+                    self.assertEqual(request(origin, '/api/ai/confirm', token=admin, data=confirmation)[0], 404)
+                    status, executed = request(origin, '/api/ai/confirm', token=member, data=confirmation)
+                    self.assertEqual((status, executed['status']), (200, 'executed'))
+                    self.assertEqual(request(origin, '/api/ai/confirm', token=member, data=confirmation),
+                                     (200, executed))
+                    pickup = ai_commands.hardware(dco_tools.HDD_REQUEST, {'sku': 'HDD-4TB', 'rackId': 'RACK-01'},
+                                                  'RACK-01 HDD-4TB 반출', {}, accounts.session(admin))
+                    pickup_request = {'confirmationId': pickup['confirmationId'], 'approved': True}
+                    self.assertEqual(request(origin, '/api/ai/confirm', token=member, data=pickup_request)[0], 404)
+                    self.assertEqual(request(origin, '/api/ai/confirm', token=admin, data=pickup_request)[1]['status'],
+                                     'executed')
+                    with postgres_store.database(web, workspace=0, account=member_id) as conn:
+                        self.assertIsNone(conn.execute('SELECT id FROM ai_tool_confirmations WHERE id = ?',
+                                                       (pickup['confirmationId'],)).fetchone())
+                    with postgres_store.database(web, workspace=member_id, account=member_id) as conn:
+                        self.assertIsNone(conn.execute('SELECT id FROM dco_work_requests WHERE id = ?',
+                                                       (pickup['confirmationId'],)).fetchone())
                 workspace = database.workspace_id.set(member_id)
                 try:
                     self.assertIn('새 업무 기록', json.dumps(database.search_rag_knowledge('업무 기록'), ensure_ascii=False))
                 finally:
                     database.workspace_id.reset(workspace)
                 with web_server(web, root / 'unavailable.db') as origin:
-                    self.assertEqual(request(origin, '/api/logs', token=member)[1]['logs'][0]['raw_text'], '새 업무 기록')
+                    self.assertEqual(request(origin, '/api/ai/confirm', token=member, data=confirmation),
+                                     (200, executed))
+                    logs = request(origin, '/api/logs', token=member)[1]['logs']
+                    self.assertEqual(logs[0]['incident_type'], '다음 교대 인계')
+                    self.assertEqual((logs[1]['ticket_no'], logs[1]['status']), ('PG-1', '완료'))
+                    self.assertEqual(logs[2]['raw_text'], '새 업무 기록')
                     values = request(origin, '/api/account/preferences', token=member)[1]
                     self.assertEqual(values['default_location'], '변경 위치')
                     status, _ = request(origin, '/api/account/password', token=member, data={

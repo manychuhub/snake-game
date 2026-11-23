@@ -73,7 +73,8 @@ def main():
     engine_port = '8011'
     engine_url = f'http://127.0.0.1:{engine_port}'
     shared = {**environment, 'HYBRID_API_AUTH_TOKEN': token, 'PYTHONPATH': '/app'}
-    engine_env = {**shared, 'GEMINI_API_KEY': key, 'BRIDGE_PORT': engine_port, 'BRIDGE_DATA_DIR': str(data / 'engine')}
+    engine_env = {name: value for name, value in shared.items() if not name.startswith('SHIFT_BRIDGE_DCO_')}
+    engine_env.update(GEMINI_API_KEY=key, BRIDGE_PORT=engine_port, BRIDGE_DATA_DIR=str(data / 'engine'))
     web_env = {**shared, **web_settings, 'SHIFT_BRIDGE_WEB_HOST': '0.0.0.0',
                'SHIFT_BRIDGE_DB_PATH': str(data / 'web/shift_bridge.db'), 'SHIFT_BRIDGE_SEED_DEMO': '0',
                'SHIFT_BRIDGE_ENGINE_URL': engine_url}

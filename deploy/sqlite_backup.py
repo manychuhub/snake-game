@@ -7,8 +7,9 @@ from pathlib import Path
 import re
 import sqlite3
 
-WORK_TABLES = ('work_logs', 'handover_reports', 'technical_documents', 'missing_queries', 'audit_trails')
-ACCOUNT_TABLES = ('web_users', 'web_sessions', 'web_preferences', 'web_events')
+DCO_TABLES = ('ai_tool_confirmations', 'dco_work_requests')
+WORK_TABLES = ('work_logs', 'handover_reports', 'technical_documents', 'missing_queries', 'audit_trails', *DCO_TABLES)
+ACCOUNT_TABLES = ('web_users', 'web_sessions', 'web_preferences', 'web_events', 'ai_notifications')
 ENGINE_TABLES = ('records', 'reports', 'documents', 'usage')
 
 
