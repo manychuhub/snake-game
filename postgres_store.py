@@ -66,6 +66,36 @@ class Connection:
         self.connection.commit()
 
 
+def _safe_connection_failure(error):
+    """Classify failures; never include connection strings or exception text in logs."""
+    detail = str(error).lower()
+    state = getattr(error, 'sqlstate', None)
+    if state == '28P01' or 'password authentication failed' in detail:
+        return 'AUTH_PASSWORD_REJECTED'
+    if state == '28000' or ('role ' in detail and 'does not exist' in detail):
+        return 'AUTH_ROLE_REJECTED'
+    if ('root certificate file' in detail or 'certificate file' in detail) and (
+            'permission denied' in detail or 'does not exist' in detail
+            or 'could not open' in detail):
+        return 'SSL_CA_FILE_ERROR'
+    if ('certificate verify failed' in detail or 'certificate validation failed' in detail
+            or 'certificate signature failure' in detail):
+        return 'SSL_CERTIFICATE_VERIFY_FAILED'
+    if 'no pg_hba.conf entry' in detail:
+        return 'SERVER_ACCESS_REJECTED'
+    if 'could not translate host name' in detail or 'name or service not known' in detail:
+        return 'DNS_LOOKUP_FAILED'
+    if 'timeout expired' in detail or 'connection timed out' in detail:
+        return 'NETWORK_TIMEOUT'
+    if 'connection refused' in detail:
+        return 'NETWORK_CONNECTION_REFUSED'
+    if 'too many connections' in detail:
+        return 'SERVER_CONNECTION_LIMIT'
+    if 'invalid connection option' in detail or 'invalid connection string' in detail:
+        return 'CONNECTION_STRING_INVALID'
+    return 'UNCLASSIFIED_CONNECTION_ERROR'
+
+
 def connect(dsn, **kwargs):
     try:
         options = conninfo_to_dict(dsn)
@@ -74,9 +104,19 @@ def connect(dsn, **kwargs):
         local = host in loopback and options.get('hostaddr', host) in loopback
         if not local and options.get('sslmode') != 'verify-full':
             raise StorageError('Remote PostgreSQL requires sslmode=verify-full.')
+        ca_path = options.get('sslrootcert')
+        if ca_path and ca_path != 'system':
+            try:
+                with open(ca_path, 'rb') as certificate:
+                    if not certificate.read(1):
+                        raise StorageError('PostgreSQL SSL CA certificate file is empty.')
+            except OSError:
+                raise StorageError('PostgreSQL SSL CA certificate file is missing or unreadable.') from None
         return psycopg.connect(dsn, connect_timeout=5, prepare_threshold=None, **kwargs)
-    except psycopg.Error:
-        raise StorageError('Could not connect to PostgreSQL.') from None
+    except psycopg.Error as error:
+        raise StorageError(
+            f'Could not connect to PostgreSQL [{_safe_connection_failure(error)}].'
+        ) from None
 
 
 @contextmanager
