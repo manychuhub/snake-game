@@ -73,7 +73,8 @@ def main():
     engine_port = '8011'
     engine_url = f'http://127.0.0.1:{engine_port}'
     shared = {**environment, 'HYBRID_API_AUTH_TOKEN': token, 'PYTHONPATH': '/app'}
-    engine_env = {**shared, 'GEMINI_API_KEY': key, 'BRIDGE_PORT': engine_port, 'BRIDGE_DATA_DIR': str(data / 'engine')}
+    engine_env = {name: value for name, value in shared.items() if not name.startswith('SHIFT_BRIDGE_DCO_')}
+    engine_env.update(GEMINI_API_KEY=key, BRIDGE_PORT=engine_port, BRIDGE_DATA_DIR=str(data / 'engine'))
     web_env = {**shared, **web_settings, 'SHIFT_BRIDGE_WEB_HOST': '0.0.0.0',
                'SHIFT_BRIDGE_DB_PATH': str(data / 'web/shift_bridge.db'), 'SHIFT_BRIDGE_SEED_DEMO': '0',
                'SHIFT_BRIDGE_ENGINE_URL': engine_url}
@@ -86,7 +87,7 @@ def main():
         processes.append(subprocess.Popen(
             [sys.executable, '-m', 'uvicorn', 'api_server:app', '--host', '127.0.0.1',
              '--port', engine_port, '--no-access-log'], cwd='/app/BridgeCLI', env=engine_env,
-            user=10002, group=10002, extra_groups=[],
+            user=10002, group=10002, extra_groups=[1000],
         ))
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         deadline = time.monotonic() + 20
@@ -102,7 +103,7 @@ def main():
         else:
             raise RuntimeError('BridgeCLI did not start.')
         processes.append(subprocess.Popen([sys.executable, 'app.py'], cwd='/app/Agent', env=web_env,
-                                          user=10001, group=10001, extra_groups=[]))
+                                          user=10001, group=10001, extra_groups=[1000]))
         while all(process.poll() is None for process in processes):
             time.sleep(0.5)
         return 1

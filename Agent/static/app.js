@@ -11,12 +11,14 @@ let isReportEditMode = false;
 let speechRecognitionInstance = null;
 let isRecording = false;
 const demoMode = ["/demo", "/demo/"].includes(window.location.pathname);
+let workLogStatus = null;
+let workLogRequest = 0;
 
 function requestApi(path, options) {
     if (!demoMode) {
         return fetch(path, options).then(response => {
             if (response.status === 401) location.replace("/login");
-            if (options?.method === "POST") refreshAccount().catch(console.error);
+            if (options?.method === "POST") refreshAccount().catch(() => {});
             return response;
         });
     }
@@ -117,7 +119,10 @@ function switchTab(tabId, btnElement) {
     // 탭별 새로고침 트리거
     if (tabId === "tab-stats") loadAnomalyStatistics();
     if (tabId === "tab-priority") loadPriorityTasks();
-    if (tabId === "tab-report") loadHandoverReports();
+    if (tabId === "tab-report") {
+        loadHandoverReports();
+        globalThis.workspaceAi?.refreshActivity();
+    }
     if (tabId === "tab-docs") loadTechnicalDocs();
 }
 
@@ -270,14 +275,23 @@ async function saveClassifiedLog() {
     }
 }
 
-async function loadWorkLogs(statusFilter = null) {
+async function loadWorkLogs(statusFilter = workLogStatus) {
+    workLogStatus = statusFilter;
+    const requestId = ++workLogRequest;
     const tbody = document.getElementById("workLogsTbody");
+    const ai = globalThis.workspaceAi;
     try {
-        let url = "/api/logs";
-        if (statusFilter) url += `?status=${encodeURIComponent(statusFilter)}`;
-        const res = await requestApi(url);
-        const data = await res.json();
-        const logs = data.logs || [];
+        const params = new URLSearchParams();
+        if (statusFilter) params.set("status", statusFilter);
+        if (ai?.logFilter) params.set("dco", ai.logFilter);
+        let logs = ai?.mockLogs(statusFilter);
+        if (!logs) {
+            const res = await requestApi(params.size ? `/api/logs?${params}` : "/api/logs");
+            if (!res.ok) throw new Error("업무 기록을 불러올 수 없습니다.");
+            logs = (await res.json()).logs || [];
+        }
+        if (requestId !== workLogRequest) return;
+        ai?.setLogs(logs);
 
         if (demoMode && !statusFilter && logs.length) {
             document.getElementById("rawLogInput").value = logs[0].raw_text;
@@ -290,16 +304,19 @@ async function loadWorkLogs(statusFilter = null) {
             return;
         }
 
-        tbody.innerHTML = logs.map(l => {
+        tbody.innerHTML = logs.map((l, index) => {
             const statusClass = l.status === "완료" ? "complete" : (l.status === "미완료" ? "pending" : "check");
             const tierClass = `tier-${escapeHtml(l.priority_tier || 'P3')}`;
+            const device = escapeHtml(l.device_id || '-');
+            const ticket = escapeHtml(l.ticket_no || '-');
+            const details = ai?.logLinks(l, index);
             return `
             <tr>
-                <td><strong>#${l.id}</strong></td>
+                <td><strong>#${escapeHtml(String(l.id))}</strong></td>
                 <td>${escapeHtml(l.execution_time || '-')}</td>
                 <td>${escapeHtml(l.operator || '-')}</td>
-                <td><code style="color: #38bdf8;">${escapeHtml(l.device_id || '-')}</code></td>
-                <td><strong>${escapeHtml(l.ticket_no || '-')}</strong></td>
+                <td><code style="color: #38bdf8;">${details?.device ?? device}</code></td>
+                <td><strong>${details?.ticket ?? ticket}</strong></td>
                 <td>${escapeHtml(l.incident_type || '-')}</td>
                 <td>
                     <div style="font-weight: 500;">${escapeHtml(l.action_taken || '-')}</div>
@@ -308,19 +325,23 @@ async function loadWorkLogs(statusFilter = null) {
                 <td><span class="badge-status ${statusClass}">${escapeHtml(l.status)}</span></td>
                 <td><span class="tier-badge ${tierClass}">${escapeHtml(l.priority_tier || 'P3')} (${escapeHtml(String(l.priority_score))}점)</span></td>
                 <td>
-                    <button class="btn-sample" style="color: #f87171; border-color: #ef4444;" onclick="deleteLog(${l.id})">
-                        <i class="fa-solid fa-trash"></i>
-                    </button>
+                    ${!ai?.isMock && !demoMode && Number.isSafeInteger(l.id) ? `<button class="btn-sample" type="button" aria-label="업무 기록 삭제" style="color: #f87171; border-color: #ef4444;" onclick="deleteLog(${l.id})">
+                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                    </button>` : ""}
                 </td>
             </tr>
             `;
         }).join("");
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="10" style="color: #f87171; text-align: center;">로딩 실패: ${escapeHtml(e.message)}</td></tr>`;
+        if (requestId === workLogRequest) {
+            ai?.setLogs([]);
+            tbody.innerHTML = `<tr><td colspan="10" style="color: #f87171; text-align: center;">업무 기록을 불러오지 못했습니다.</td></tr>`;
+        }
     }
 }
 
 function filterLogs(status, btnElement) {
+    globalThis.workspaceAi?.setLogFilter(null);
     document.querySelectorAll(".btn-filter").forEach(b => b.classList.remove("active"));
     if (btnElement) btnElement.classList.add("active");
     loadWorkLogs(status);
@@ -978,63 +999,8 @@ function sendAgentCmd(cmd) {
     sendAgentMessage();
 }
 
-async function sendAgentMessage() {
-    const input = document.getElementById("agentInput");
-    const cmd = input.value.trim();
-    if (!cmd) return;
-
-    const chatContainer = document.getElementById("agentChatContainer");
-
-    // 사용자 말풍선
-    const userBubble = document.createElement("div");
-    userBubble.className = "chat-bubble user";
-    userBubble.textContent = cmd;
-    chatContainer.appendChild(userBubble);
-    input.value = "";
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-
-    // AI 대기 말풍선
-    const aiBubble = document.createElement("div");
-    aiBubble.className = "chat-bubble ai";
-    aiBubble.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 도구 계획 수립 및 시스템 실행 중...`;
-    chatContainer.appendChild(aiBubble);
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-
-    try {
-        const res = await requestApi("/api/agent/command", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ command: cmd })
-        });
-        const data = await res.json();
-        const plan = data.plan || {};
-        const result = data.execution_result;
-
-        let contentHtml = `<div style="font-weight: 600; color: var(--accent); margin-bottom: 4px;">⚡ 도구 실행: ${escapeHtml(plan.function_name || 'direct_answer')}</div>`;
-        contentHtml += `<div>${escapeHtml(plan.assistant_message || '')}</div>`;
-
-        if (Array.isArray(result)) {
-            contentHtml += `<div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">`;
-            result.slice(0, 5).forEach(item => {
-                contentHtml += `
-                <div style="background: #090d14; border: 1px solid #243247; padding: 8px 12px; border-radius: 4px; font-size: 0.8rem;">
-                    <strong>[#${escapeHtml(item.id || item.ticket_no || '')}] ${escapeHtml(item.device_id || item.filename || '')}</strong>: ${escapeHtml(item.action_taken || item.summary || item.cause || '')} 
-                    <span class="badge-status ${item.status === '완료' ? 'complete' : 'pending'}">${escapeHtml(item.status || '')}</span>
-                </div>`;
-            });
-            contentHtml += `</div>`;
-        } else if (typeof result === "string") {
-            contentHtml += `<div style="margin-top: 8px; padding: 10px; background: #090d14; border-radius: 4px; font-size: 0.82rem; white-space: pre-wrap;">${escapeHtml(result)}</div>`;
-        } else if (result && typeof result === "object") {
-            contentHtml += `<div style="margin-top: 8px; padding: 10px; background: #090d14; border-radius: 4px; font-size: 0.8rem;"><pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre></div>`;
-        }
-
-        aiBubble.innerHTML = contentHtml;
-    } catch (e) {
-        aiBubble.innerHTML = `<span style="color: #f87171;">오류: ${escapeHtml(e.message)}</span>`;
-    } finally {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
+function sendAgentMessage() {
+    globalThis.workspaceAi?.sendFromAgent();
 }
 
 // =============================================================================

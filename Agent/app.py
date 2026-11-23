@@ -23,6 +23,8 @@ from functools import partial
 from socketserver import ThreadingTCPServer
 
 import accounts
+import ai_commands
+import ai_workspace
 import database as db
 import demo
 import gemini_client as gemini
@@ -32,9 +34,10 @@ STATIC_ALIASES = {'/': '/index.html', '/workspace': '/index.html', '/workspace/'
                   '/account/preferences': '/preferences.html',
                   '/login': '/account.html', '/admin': '/admin.html', '/demo': '/index.html', '/demo/': '/index.html', '/about': '/about.html', '/about/': '/about.html'}
 INTRO_FILES = {'/about.html', '/about.css', '/about.js'}
-STATIC_PATHS = {'/index.html', '/style.css', '/app.js'} | INTRO_FILES | {
+WORKSPACE_ASSETS = {'/style.css', '/app.js', '/workspace-ai.js', '/workspace-ai-mock.js'}
+STATIC_PATHS = {'/index.html'} | WORKSPACE_ASSETS | INTRO_FILES | {
     '/account.html', '/admin.html', '/account.css', '/account.js', '/admin.js', '/preferences.html', '/preferences.js'}
-RENDER_PUBLIC_PATHS = {'/demo', '/demo/', '/style.css', '/app.js'} | INTRO_FILES
+RENDER_PUBLIC_PATHS = {'/demo', '/demo/'} | WORKSPACE_ASSETS | INTRO_FILES
 
 PORT = int(os.environ.get("PORT", 8000))
 HOST = os.getenv('SHIFT_BRIDGE_WEB_HOST', '127.0.0.1')
@@ -224,7 +227,7 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
             if payload is None:
                 return self.send_json({'error': '공개 체험 경로를 찾을 수 없습니다.'}, 404)
             return self.send_json(payload)
-        if path in PUBLIC_ACCOUNT_FILES or path in {'/style.css', '/app.js'} or STATIC_ALIASES.get(path, path) in INTRO_FILES:
+        if path in PUBLIC_ACCOUNT_FILES or path in WORKSPACE_ASSETS or STATIC_ALIASES.get(path, path) in INTRO_FILES:
             return self.serve_static(path, head=head)
         admin_only = path in {'/admin', '/admin.html', '/admin.js', '/api/settings/status'}
         if not self.require_member(path, admin=admin_only or path.startswith('/api/admin/')):
@@ -264,10 +267,22 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
         path = parsed_url.path
         query = urllib.parse.parse_qs(parsed_url.query)
 
+        if path.startswith('/api/ai/console/'):
+            url = ai_commands.console_redirect(path.removeprefix('/api/ai/console/'), self.member)
+            if url is None:
+                return self.send_json({'error': '승인된 콘솔 요청을 찾을 수 없습니다.'}, 404)
+            self.send_response(303)
+            self.send_header('Location', url)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+
         # 1. API 라우트 처리
         if path == '/api/logs':
             status_filter = query.get('status', [None])[0]
             logs = db.get_work_logs(limit=100, status_filter=status_filter)
+            if dco_filter := query.get('dco', [None])[0]:
+                logs = [ai_workspace.redact_source(row) for row in ai_workspace.filter_logs(logs, dco_filter)]
             return self.send_json({"logs": logs})
 
         elif path == '/api/reports':
@@ -285,6 +300,9 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
         elif path == '/api/audit':
             trails = db.get_audit_trails(limit=50)
             return self.send_json({"audit_trails": trails})
+
+        elif path == '/api/ai/activity':
+            return self.send_json(ai_workspace.activity(self.member, ai_commands.AUDIT_COMMANDS))
 
         elif path == '/api/settings/status':
             health = gemini.get_bridge_health()
@@ -396,13 +414,23 @@ class ShiftBridgeHandler(SimpleHTTPRequestHandler):
                 self.send_json({'error': '오늘의 AI 생성 한도 3회를 모두 사용했습니다. 한국 시간 자정에 초기화됩니다.'}, 429)
             except accounts.SessionExpired:
                 self.send_json({'error': '로그인이 필요합니다.'}, 401)
+            except ai_commands.ToolPermissionError:
+                self.send_json({'error': '공용 워크스페이스의 관리자 권한이 필요합니다.'}, 403)
             except gemini.BridgeError as error:
-                self.send_json({'error': str(error)}, 502)
+                self.send_json({'error': ai_workspace.redact(str(error))}, 502)
             except (TypeError, AttributeError, ValueError):
                 self.send_json({'error': '요청 항목 형식이 올바르지 않습니다.'}, 400)
 
     def route_post(self, body):
         path = urllib.parse.urlparse(self.path).path
+
+        if path == '/api/ai/command':
+            return self.send_json(ai_commands.command(body, self.member))
+        if path == '/api/ai/confirm':
+            result = ai_commands.confirm(body, self.member)
+            if result is None:
+                return self.send_json({'error': '확인 요청을 찾을 수 없습니다.'}, 404)
+            return self.send_json(result)
 
         # 기능 1: 원문 분석 및 11개 필드 자동 분류
         if path == '/api/logs/classify':

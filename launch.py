@@ -79,7 +79,8 @@ def main():
     common = {key: value for key, value in os.environ.items()
               if key not in {'SHIFT_BRIDGE_DATABASE_URL', 'SHIFT_BRIDGE_ENGINE_DATABASE_URL'}}
     common['PYTHONPATH'] = os.pathsep.join(filter(None, (str(ROOT), common.get('PYTHONPATH'))))
-    engine_environment = {**common, 'HYBRID_API_AUTH_TOKEN': token}
+    engine_environment = {key: value for key, value in common.items() if not key.startswith('SHIFT_BRIDGE_DCO_')}
+    engine_environment['HYBRID_API_AUTH_TOKEN'] = token
     if engine_dsn := os.getenv('SHIFT_BRIDGE_ENGINE_DATABASE_URL'):
         engine_environment['SHIFT_BRIDGE_ENGINE_DATABASE_URL'] = engine_dsn
     processes = []

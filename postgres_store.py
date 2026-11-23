@@ -6,7 +6,8 @@ from psycopg.conninfo import conninfo_to_dict
 
 WEB_DSN = 'SHIFT_BRIDGE_DATABASE_URL'
 ENGINE_DSN = 'SHIFT_BRIDGE_ENGINE_DATABASE_URL'
-RLS_TABLES = ('web_preferences', 'work_logs', 'handover_reports', 'technical_documents', 'missing_queries', 'audit_trails')
+RLS_TABLES = ('web_preferences', 'work_logs', 'handover_reports', 'technical_documents', 'missing_queries',
+              'audit_trails', 'ai_confirmations', 'ai_notifications', 'ai_tool_confirmations', 'dco_work_requests')
 
 
 class StorageError(RuntimeError):
